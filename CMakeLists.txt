@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.3)
 project(libfive)
 
+
+# Set libfive configuration defaults
+set(LIBFIVE_WITH_ARCH_NATIVE 1)
+
+
 # Properly distinguish between Apple and upstream Clang
 cmake_policy(SET CMP0025 NEW)
 
@@ -9,7 +14,12 @@ set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
 ################################################################################
 
-set(CMAKE_CXX_FLAGS "-Wall -Wextra -g -fPIC -pedantic -Werror=switch -march=native -stdlib=libc++")
+set(CMAKE_CXX_FLAGS "-Wall -Wextra -g -fPIC -pedantic -Werror=switch -stdlib=libc++")
+
+if (LIBFIVE_WITH_MARCH_NATIVE)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
+endif()
+
 set(CMAKE_CXX_FLAGS_RELEASE  "-O3 -DRELEASE -DEIGEN_NO_DEBUG")
 set(CMAKE_CXX_FLAGS_DEBUG    "-O0")
 
