@@ -8,6 +8,7 @@ set(LIBFIVE_WITH_ISOC99_HW_ROUNDING 0)
 set(LIBFIVE_FIND_PKG_QT 1)
 set(LIBFIVE_FIND_PKG_PNG 1)
 set(LIBFIVE_FIND_PKG_GUILE 1)
+set(LIBFIVE_FIND_PKG_THREADS 1)
 
 
 # Properly distinguish between Apple and upstream Clang
@@ -64,9 +65,9 @@ endif()
 pkg_check_modules(EIGEN REQUIRED eigen3)
 
 
-if (UNIX AND NOT(APPLE))
+if (LIBFIVE_FIND_PKG_THREADS AND (UNIX AND NOT(APPLE)))
     find_package(Threads REQUIRED)
-endif(UNIX AND NOT(APPLE))
+endif(LIBFIVE_FIND_PKG_THREADS AND (UNIX AND NOT(APPLE)))
 
 ################################################################################
 # Inform the user which subsystems will be built and any missing deps
