@@ -7,6 +7,7 @@ set(LIBFIVE_WITH_MARCH_NATIVE 1)
 set(LIBFIVE_WITH_ISOC99_HW_ROUNDING 0)
 set(LIBFIVE_FIND_PKG_QT 1)
 set(LIBFIVE_FIND_PKG_PNG 1)
+set(LIBFIVE_FIND_PKG_GUILE 1)
 
 
 # Properly distinguish between Apple and upstream Clang
@@ -55,7 +56,11 @@ endif()
 
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(GUILE guile-2.2)
+
+if (LIBFIVE_FIND_PKG_GUILE)
+   pkg_check_modules(GUILE guile-2.2)
+endif()
+
 pkg_check_modules(EIGEN REQUIRED eigen3)
 
 
