@@ -6,6 +6,7 @@ project(libfive)
 set(LIBFIVE_WITH_MARCH_NATIVE 1)
 set(LIBFIVE_WITH_ISOC99_HW_ROUNDING 0)
 set(LIBFIVE_FIND_PKG_QT 1)
+set(LIBFIVE_FIND_PKG_PNG 1)
 
 
 # Properly distinguish between Apple and upstream Clang
@@ -47,7 +48,10 @@ if (LIBFIVE_FIND_PKG_QT)
 endif()
 
 find_package(Boost REQUIRED)
-find_package(PNG REQUIRED)
+
+if (LIBFIVE_FIND_PKG_PNG)
+   find_package(PNG REQUIRED)
+endif()
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GUILE guile-2.2)
