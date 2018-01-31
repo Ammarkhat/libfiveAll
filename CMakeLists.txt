@@ -5,6 +5,7 @@ project(libfive)
 # Set libfive configuration defaults
 set(LIBFIVE_WITH_MARCH_NATIVE 1)
 set(LIBFIVE_WITH_ISOC99_HW_ROUNDING 0)
+set(LIBFIVE_FIND_PKG_QT 1)
 
 
 # Properly distinguish between Apple and upstream Clang
@@ -40,7 +41,11 @@ endif()
 
 ################################################################################
 # Find all packages here at the top level so we can print debugging info
-find_package(Qt5Core)
+
+if (LIBFIVE_FIND_PKG_QT)
+   find_package(Qt5Core)
+endif()
+
 find_package(Boost REQUIRED)
 find_package(PNG REQUIRED)
 
