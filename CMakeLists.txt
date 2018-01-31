@@ -4,6 +4,7 @@ project(libfive)
 
 # Set libfive configuration defaults
 set(LIBFIVE_WITH_MARCH_NATIVE 1)
+set(LIBFIVE_WITH_ISOC99_HW_ROUNDING 0)
 
 
 # Properly distinguish between Apple and upstream Clang
