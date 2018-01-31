@@ -53,9 +53,11 @@ if (LIBFIVE_FIND_PKG_PNG)
    find_package(PNG REQUIRED)
 endif()
 
+
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GUILE guile-2.2)
 pkg_check_modules(EIGEN REQUIRED eigen3)
+
 
 if (UNIX AND NOT(APPLE))
     find_package(Threads REQUIRED)
