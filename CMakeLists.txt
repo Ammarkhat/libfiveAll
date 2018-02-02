@@ -88,6 +88,9 @@ if (EMSCRIPTEN)
     # Ensure WebAssembly is generated rather than asm.js.
     link_libraries("-s WASM=1")
 
+    # Improves debug-ability of exceptions.
+    link_libraries("-s ASSERTIONS=1")
+
 endif()
 
 
