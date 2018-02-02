@@ -35,6 +35,41 @@ if (EMSCRIPTEN)
     # WebAssembly doesn't currently support threads.
     set(LIBFIVE_FIND_PKG_THREADS 0)
 
+
+    # Emscripten disables search of "system" include paths
+    # but that prevents use of header-only libraries.
+    #
+    # The functionality from Boost (and Eigen) that libfive
+    # uses is in header-only libraries so we re-enable search
+    # of system paths to avoid the need to (re-)install the
+    # libraries outside of the system paths.
+    #
+    # Note: In theory this could break something if we
+    #       accidently found non-Boost/Eigen libraries.
+    #
+    set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE BOTH)
+
+    # This enables the (header-only) Eigen library to be found (as I
+    # recall, via a `.pc` file with `pkg-config`) via the same path
+    # root used to find Boost, when supplied via executing, e.g.:
+    #
+    #   emcmake cmake .. -DCMAKE_PREFIX_PATH=/usr/local
+    #
+    # In theory this setting should already be enabled by default
+    # (see "this behavior is enabled by default if CMAKE_MINIMUM_REQUIRED_VERSION is 3.1 or later" on
+    # <https://cmake.org/cmake/help/v3.1/module/FindPkgConfig.html#variable:PKG_CONFIG_USE_CMAKE_PREFIX_PATH>)
+    # because this `CMakeLists.txt` file specifies:
+    #
+    #   cmake_minimum_required(VERSION 3.3)
+    #
+    # But after the call to `project()` the value of `CMAKE_MINIMUM_REQUIRED_VERSION`
+    # seems to be overwritten by the value `3.0.0` as specified in
+    # `emscripten/1.37.28/cmake/Modules/Platform/Emscripten.cmake`. I
+    # thought CMake scoping rules prevented that from happening but it
+    # appears this is not the case. Which leads to rather confusing behaviour...
+    #
+    set(PKG_CONFIG_USE_CMAKE_PREFIX_PATH 1)
+
 endif()
 
 
