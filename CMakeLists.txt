@@ -91,6 +91,11 @@ if (EMSCRIPTEN)
     # Improves debug-ability of exceptions.
     link_libraries("-s ASSERTIONS=1")
 
+
+    # Ensure libfive library uses WebAssembly port of libpng.
+    # Note: This should really only be in the library-specific `CMakeLists.txt`.
+    add_compile_options(-s USE_LIBPNG=1)
+
 endif()
 
 
