@@ -22,6 +22,19 @@ if (EMSCRIPTEN)
     # so we specify it manually.
     set(LIBFIVE_WITH_ISOC99_HW_ROUNDING 1)
 
+
+    # We don't (yet?!) attempt to support Qt for WebAssembly
+    set(LIBFIVE_FIND_PKG_QT 0)
+
+    # We will use `libpng` from Emscripten ports
+    set(LIBFIVE_FIND_PKG_PNG 0)
+
+    # We don't (yet?) support Guile for WebAssembly
+    set(LIBFIVE_FIND_PKG_GUILE 0)
+
+    # WebAssembly doesn't currently support threads.
+    set(LIBFIVE_FIND_PKG_THREADS 0)
+
 endif()
 
 
