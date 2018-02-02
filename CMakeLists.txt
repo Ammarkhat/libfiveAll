@@ -107,10 +107,16 @@ set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
 ################################################################################
 
-set(CMAKE_CXX_FLAGS "-Wall -Wextra -g -fPIC -pedantic -Werror=switch -stdlib=libc++")
+set(CMAKE_CXX_FLAGS "-Wall -Wextra -g -fPIC -pedantic -Werror=switch")
 
 if (LIBFIVE_WITH_MARCH_NATIVE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
+endif()
+
+if (APPLE)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
+else()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -lstdc++")
 endif()
 
 set(CMAKE_CXX_FLAGS_RELEASE  "-O3 -DRELEASE -DEIGEN_NO_DEBUG")
