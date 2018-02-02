@@ -3,6 +3,34 @@
 
 (formerly known as [mkeeter/ao](https://github.com/mkeeter/ao))
 
+----
+
+#### This repository is a port of libfive to WebAssembly via Emscripten
+
+(Tested on Mac OS X with dependencies installed via Homebrew.)
+
+Building:
+
+ * Install dependencies with `brew install cmake pkg-config eigen boost`.
+
+ * Install & enable `emsdk` as per <http://webassembly.org/getting-started/developers-guide/>.
+
+ * Clone <https://github.com/Omniblox/libfive/tree/add-web-assembly-support>.
+
+ * At root of `Omniblox/libfive` repository:
+
+       mkdir build-wa
+       cd build-wa
+
+       emcmake cmake .. -DCMAKE_PREFIX_PATH=$(brew --prefix)
+       emmake make
+
+       pushd libfive/examples/ && emrun --no_browser --port 8089 .
+
+ * Now visit <http://localhost:8089/example-cxx-libfive-basic.html> in your WebAssembly-capable browser.
+
+----
+
 ## About
 - [Project homepage](https://libfive.com) (with demo videos!)
 - [API Examples](https://libfive.com/examples)
