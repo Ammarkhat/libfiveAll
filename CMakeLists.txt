@@ -70,6 +70,14 @@ if (EMSCRIPTEN)
     #
     set(PKG_CONFIG_USE_CMAKE_PREFIX_PATH 1)
 
+
+    # Prevents warning from Emscripten that dynamic libraries
+    # are "currently not supported".
+    set(CMAKE_SHARED_LIBRARY_SUFFIX ".bc")
+
+    # Ensures examples/tests produce HTML + JavaScript files.
+    SET(CMAKE_EXECUTABLE_SUFFIX ".html")
+
 endif()
 
 
