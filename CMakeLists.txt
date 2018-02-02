@@ -11,6 +11,15 @@ set(LIBFIVE_FIND_PKG_GUILE 1)
 set(LIBFIVE_FIND_PKG_THREADS 1)
 
 
+# Set WebAssembly/Emscripten configuration
+if (EMSCRIPTEN)
+
+    # Emscripten doesn't support `-march=native` flag.
+    set(LIBFIVE_WITH_MARCH_NATIVE 0)
+
+endif()
+
+
 # Properly distinguish between Apple and upstream Clang
 cmake_policy(SET CMP0025 NEW)
 
