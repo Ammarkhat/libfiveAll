@@ -17,6 +17,11 @@ if (EMSCRIPTEN)
     # Emscripten doesn't support `-march=native` flag.
     set(LIBFIVE_WITH_MARCH_NATIVE 0)
 
+    # `Boost.Numeric.Interval` can't automatically determine
+    # rounding control specialisation for WebAssembly
+    # so we specify it manually.
+    set(LIBFIVE_WITH_ISOC99_HW_ROUNDING 1)
+
 endif()
 
 
