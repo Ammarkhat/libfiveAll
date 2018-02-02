@@ -78,6 +78,16 @@ if (EMSCRIPTEN)
     # Ensures examples/tests produce HTML + JavaScript files.
     SET(CMAKE_EXECUTABLE_SUFFIX ".html")
 
+
+    # Note: It's not entirely clear to me what approach is best for
+    # specifying the Emscripten `-s` options below. It seems that it's
+    # not enough, for example, to use `add_compile_options(-s WASM=1)`
+    # but `link_libraries("-s WASM=1")` is sufficient--even though
+    # `-s` seems more like a compiler flag.
+
+    # Ensure WebAssembly is generated rather than asm.js.
+    link_libraries("-s WASM=1")
+
 endif()
 
 
