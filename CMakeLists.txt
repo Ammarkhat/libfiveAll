@@ -91,6 +91,9 @@ if (EMSCRIPTEN)
     # Improves debug-ability of exceptions.
     link_libraries("-s ASSERTIONS=1")
 
+    # Don't require memory size to be specified upfront.
+    # Only required by STL export example but presumably useful generally.
+    link_libraries("-s ALLOW_MEMORY_GROWTH=1")
 
     # Ensure libfive library uses WebAssembly port of libpng.
     # Note: This should really only be in the library-specific `CMakeLists.txt`.
