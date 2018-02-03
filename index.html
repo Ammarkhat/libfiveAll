@@ -5,6 +5,10 @@
 Demos:
 <ul>
 <li><a href="examples/example-cxx-libfive-basic.html">example-cxx-libfive-basic</a></li>
+<li><a href="examples/example-cxx-libfive-to-stl.html">example-cxx-libfive-to-stl</a> &mdash; renders a sphere (of requested radius) with three.js from an STL file exported from a mesh created with libfive.<br />
+This example will present an input dialog&mdash;the value you type will be used as the sphere radius (to limit the size of the generated STL file recommended test value is 2 or less).<br />
+Click the "Cancel" button the second time the dialog appears (which signifies "end of input"). [Hey, this is only a Proof-of-Concept, ok...]<br />
+(Note: This PoC doesn't actually create bindings to libfive, it just retrieves the generated <code>.stl</code> file (produced by the C++ example) from the Emscripten/WebAssembly "virtual filesytem". A True Port would use bindings to the libfive library.)</li>
 </ul>
 </p>
 <p>
