@@ -29,6 +29,19 @@ Building:
 
  * Now visit <http://localhost:8089/example-cxx-libfive-basic.html> in your WebAssembly-capable browser.
 
+ * When run, the `example-cxx-libfive-to-stl` example will present an
+   input dialog--the value you type will be used as the sphere radius
+   (to limit the size of the generated STL file recommended test value
+   is 2 or less).
+
+   Click the "Cancel" button the second time the dialog appears (which
+   signifies "end of input"). [Hey, this is only a Proof-of-Concept, ok...]
+
+   You can interact with the exported STL file via WebAssembly's `FS`
+   object, e.g.:
+
+       FS.stat("/exported.stl")
+
 ----
 
 ## About
