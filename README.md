@@ -37,6 +37,8 @@ Building:
    Click the "Cancel" button the second time the dialog appears (which
    signifies "end of input"). [Hey, this is only a Proof-of-Concept, ok...]
 
+   The generated STL file will be displayed via the three.js library.
+
    You can interact with the exported STL file via WebAssembly's `FS`
    object, e.g.:
 
