@@ -5,7 +5,7 @@
 
 ----
 
-#### This repository is a port of libfive to WebAssembly via Emscripten
+### This repository is a port of libfive to WebAssembly via Emscripten
 
 (Tested on Mac OS X with dependencies installed via Homebrew.)
 
