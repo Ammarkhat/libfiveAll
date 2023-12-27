@@ -1,4 +1,4 @@
-set(SRCS example-cxx-libfive-basic)
+set(SRCS example-cxx-libfive-basic.cpp)
 
 set(LIBS five)
 
@@ -6,7 +6,7 @@ add_executable(example-cxx-libfive-basic ${SRCS})
 target_link_libraries(example-cxx-libfive-basic ${LIBS})
 
 
-set(SRCS2 example-cxx-libfive-to-stl)
+set(SRCS2 example-cxx-libfive-to-stl.cpp)
 
 add_executable(example-cxx-libfive-to-stl ${SRCS2})
 target_link_libraries(example-cxx-libfive-to-stl ${LIBS})
@@ -31,5 +31,11 @@ if (EMSCRIPTEN)
                 APPEND_STRING
                 PROPERTY LINK_FLAGS " --pre-js ${CMAKE_CURRENT_SOURCE_DIR}/assets/js/example-cxx-libfive-to-stl.pre-js.js"
                 )
+
+   #set_target_properties(example-cxx-libfive-to-stl PROPERTIES
+   #            COMPILE_FLAGS "-O3"
+   #            LINK_FLAGS "-O3"
+   #            SUFFIX ".mjs"
+   #            )
 
 endif()

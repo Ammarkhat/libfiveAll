@@ -6,7 +6,7 @@
 
  */
 
-#include <iostream>
+// #include <iostream>
 
 #include "libfive.h"
 #include "libfive/solve/bounds.hpp"
@@ -14,7 +14,7 @@
 
 int main() {
 
-  std::cout << "libfive Revision: " << libfive_git_branch() << " " << libfive_git_version() << " " << libfive_git_revision() << "\n";
+  // std::cout << "libfive Revision: " << libfive_git_branch() << " " << libfive_git_version() << " " << libfive_git_revision() << "\n";
 
   auto x = Kernel::Tree::X();
   auto y = Kernel::Tree::Y();
@@ -24,9 +24,9 @@ int main() {
 
   auto bounds = findBounds(out);
 
-  std::cout << "Tree: " << libfive_tree_print(&out) << "\n";
+  // std::cout << "Tree: " << libfive_tree_print(&out) << "\n";
 
-  std::cout << "Region volume: " << bounds.volume() << "\n";
+  // std::cout << "Region volume: " << bounds.volume() << "\n";
 
   return 0;
 }

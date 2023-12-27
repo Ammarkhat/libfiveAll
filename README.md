@@ -27,6 +27,10 @@ Building:
 
        pushd libfive/examples/ && emrun --no_browser --port 8089 .
 
+
+       if you encounter an error: "Please specify rounding control mechanism.", a simple workaround is to comment out that line.
+
+
  * Now visit <http://localhost:8089/example-cxx-libfive-basic.html> in your WebAssembly-capable browser.
 
  * When run, the `example-cxx-libfive-to-stl` example will present an

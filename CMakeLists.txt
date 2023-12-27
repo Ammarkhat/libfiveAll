@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.3)
+cmake_minimum_required(VERSION 3.5)
 project(libfive)
 
 
@@ -9,7 +9,7 @@ set(LIBFIVE_FIND_PKG_QT 1)
 set(LIBFIVE_FIND_PKG_PNG 1)
 set(LIBFIVE_FIND_PKG_GUILE 1)
 set(LIBFIVE_FIND_PKG_THREADS 1)
-
+set(APPLE 1)
 
 # Set WebAssembly/Emscripten configuration
 if (EMSCRIPTEN)
@@ -21,7 +21,6 @@ if (EMSCRIPTEN)
     # rounding control specialisation for WebAssembly
     # so we specify it manually.
     set(LIBFIVE_WITH_ISOC99_HW_ROUNDING 1)
-
 
     # We don't (yet?!) attempt to support Qt for WebAssembly
     set(LIBFIVE_FIND_PKG_QT 0)
@@ -95,10 +94,18 @@ if (EMSCRIPTEN)
     # Only required by STL export example but presumably useful generally.
     link_libraries("-s ALLOW_MEMORY_GROWTH=1")
 
+    #link_libraries("-s ENVIRONMENT=web")
+
+    #link_libraries("-s SINGLE_FILE=1")
+
     # Ensure libfive library uses WebAssembly port of libpng.
     # Note: This should really only be in the library-specific `CMakeLists.txt`.
-    add_compile_options(-s USE_LIBPNG=1)
+    # add_compile_options(-s USE_LIBPNG=1)
 
+    add_compile_options("SHELL:-s USE_LIBPNG=1" "SHELL:-s USE_BOOST_HEADERS=1")
+
+    #add_compile_options(-O3)
+    #link_libraries("-O3")
 endif()
 
 
@@ -110,7 +117,7 @@ set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
 ################################################################################
 
-set(CMAKE_CXX_FLAGS "-Wall -Wextra -g -fPIC -pedantic -Werror=switch")
+set(CMAKE_CXX_FLAGS "-Wall -Wextra -fPIC -pedantic -Werror=switch")
 
 if (LIBFIVE_WITH_MARCH_NATIVE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")

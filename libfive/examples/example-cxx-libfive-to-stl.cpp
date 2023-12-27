@@ -27,7 +27,8 @@ int main() {
   auto y = Kernel::Tree::Y();
   auto z = Kernel::Tree::Z();
 
-  auto r = Kernel::Tree(*std::istream_iterator<float>(std::cin));
+  // auto r = Kernel::Tree(*std::istream_iterator<float>(std::cin));
+  auto r = Kernel::Tree(2.0f);
 
   auto out = (x * x) + (y * y) + (z * z) - r;
 
