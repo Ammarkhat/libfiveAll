@@ -17,7 +17,7 @@ Building:
 
  * Clone <https://github.com/Omniblox/libfive/tree/add-web-assembly-support>.
 
- * At root of `Omniblox/libfive` repository:
+ * At root of `libfive` repository:
 
        mkdir build-wa
        cd build-wa
@@ -25,28 +25,27 @@ Building:
        emcmake cmake .. -DCMAKE_PREFIX_PATH=$(brew --prefix)
        emmake make
 
-       pushd libfive/examples/ && emrun --no_browser --port 8089 .
+* if you encounter an error: "Please specify rounding control mechanism.", a simple workaround is to comment out that line.
+
+ 
+* rename the output libfive.api.mjs to libfive.api.js
+
+* replace:
+            var _scriptDir = import.meta.url;
+      with 
+            var _scriptDir = null;
+
+* Usage: 
+      import createModule from './src/d3/volumetric/libfive-api.js';
+      createModule().then((wasmModule) => {
+            wasmModule.meshImplicitFunction();
+            const loader = new STLLoader();
+            const file_content = wasmModule.FS.readFile('/exported.stl');
+            const result_geometry = loader.parse(file_content.buffer);
+            store.dispatch(actions.loadGeoemtry(result_geometry));
+      });
 
 
-       if you encounter an error: "Please specify rounding control mechanism.", a simple workaround is to comment out that line.
-
-
- * Now visit <http://localhost:8089/example-cxx-libfive-basic.html> in your WebAssembly-capable browser.
-
- * When run, the `example-cxx-libfive-to-stl` example will present an
-   input dialog--the value you type will be used as the sphere radius
-   (to limit the size of the generated STL file recommended test value
-   is 2 or less).
-
-   Click the "Cancel" button the second time the dialog appears (which
-   signifies "end of input"). [Hey, this is only a Proof-of-Concept, ok...]
-
-   The generated STL file will be displayed via the three.js library.
-
-   You can interact with the exported STL file via WebAssembly's `FS`
-   object, e.g.:
-
-       FS.stat("/exported.stl")
 
 ----
 
