@@ -94,9 +94,14 @@ if (EMSCRIPTEN)
     # Only required by STL export example but presumably useful generally.
     link_libraries("-s ALLOW_MEMORY_GROWTH=1")
 
-    #link_libraries("-s ENVIRONMENT=web")
+    link_libraries("-s ENVIRONMENT=web")
 
-    #link_libraries("-s SINGLE_FILE=1")
+    link_libraries("-s SINGLE_FILE=1")
+
+    link_libraries("-lembind")
+    link_libraries("-s MODULARIZE")
+    link_libraries("-s EXPORTED_FUNCTIONS=_malloc,_free")
+    link_libraries("-s EXPORT_NAME=createModule")
 
     # Ensure libfive library uses WebAssembly port of libpng.
     # Note: This should really only be in the library-specific `CMakeLists.txt`.
@@ -104,8 +109,6 @@ if (EMSCRIPTEN)
 
     add_compile_options("SHELL:-s USE_LIBPNG=1" "SHELL:-s USE_BOOST_HEADERS=1")
 
-    #add_compile_options(-O3)
-    #link_libraries("-O3")
 endif()
 
 
