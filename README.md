@@ -36,14 +36,15 @@ Building:
             var _scriptDir = null;
 
 * Usage: 
-      import createModule from './src/d3/volumetric/libfive-api.js';
-      createModule().then((wasmModule) => {
+       import createModule from './src/d3/volumetric/libfive-api.js';
+       createModule().then((wasmModule) => {
             wasmModule.meshImplicitFunction();
             const loader = new STLLoader();
             const file_content = wasmModule.FS.readFile('/exported.stl');
             const result_geometry = loader.parse(file_content.buffer);
             store.dispatch(actions.loadGeoemtry(result_geometry));
-      });
+       });
+      
 
 
 
