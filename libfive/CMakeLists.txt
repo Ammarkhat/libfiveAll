@@ -6,6 +6,7 @@ endif()
 option(BUILD_TESTS "Build test suite" ON)
 
 add_subdirectory(src)
+
 add_subdirectory(stdlib)
 
 if (BUILD_TESTS)
@@ -19,6 +20,7 @@ endif(BUILD_GUILE_BINDINGS AND GUILE_FOUND)
 if (BUILD_PYTHON_BINDINGS AND Python3_FOUND)
   add_subdirectory(bind/python)
 endif()
+add_subdirectory(api)
 
 if(UNIX AND NOT(APPLE))
     set(DEST_DIR "${CMAKE_INSTALL_PREFIX}")

@@ -39,7 +39,7 @@ namespace Axis {
         return (i == 0) ? Axis::X :
                (i == 1) ? Axis::Y :
                (i == 2) ? Axis::Z :
-               static_cast<Axis>(-1);
+               static_cast<Axis>(0);
     }
 
 }   // namespace Axis

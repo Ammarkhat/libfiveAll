@@ -1,6 +1,115 @@
 cmake_minimum_required(VERSION 3.12)
 project(libfive)
 
+
+# Set libfive configuration defaults
+set(LIBFIVE_WITH_MARCH_NATIVE 1)
+set(LIBFIVE_WITH_ISOC99_HW_ROUNDING 0)
+set(LIBFIVE_FIND_PKG_QT 1)
+set(LIBFIVE_FIND_PKG_PNG 1)
+set(LIBFIVE_FIND_PKG_GUILE 1)
+set(LIBFIVE_FIND_PKG_THREADS 1)
+set(APPLE 1)
+
+# Set WebAssembly/Emscripten configuration
+if (EMSCRIPTEN)
+
+    # Emscripten doesn't support `-march=native` flag.
+    set(LIBFIVE_WITH_MARCH_NATIVE 0)
+
+    # `Boost.Numeric.Interval` can't automatically determine
+    # rounding control specialisation for WebAssembly
+    # so we specify it manually.
+    set(LIBFIVE_WITH_ISOC99_HW_ROUNDING 1)
+
+    # We don't (yet?!) attempt to support Qt for WebAssembly
+    set(LIBFIVE_FIND_PKG_QT 0)
+
+    # We will use `libpng` from Emscripten ports
+    set(LIBFIVE_FIND_PKG_PNG 0)
+
+    # We don't (yet?) support Guile for WebAssembly
+    set(LIBFIVE_FIND_PKG_GUILE 0)
+
+    # WebAssembly doesn't currently support threads.
+    set(LIBFIVE_FIND_PKG_THREADS 0)
+
+
+    # Emscripten disables search of "system" include paths
+    # but that prevents use of header-only libraries.
+    #
+    # The functionality from Boost (and Eigen) that libfive
+    # uses is in header-only libraries so we re-enable search
+    # of system paths to avoid the need to (re-)install the
+    # libraries outside of the system paths.
+    #
+    # Note: In theory this could break something if we
+    #       accidently found non-Boost/Eigen libraries.
+    #
+    set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE BOTH)
+
+    # This enables the (header-only) Eigen library to be found (as I
+    # recall, via a `.pc` file with `pkg-config`) via the same path
+    # root used to find Boost, when supplied via executing, e.g.:
+    #
+    #   emcmake cmake .. -DCMAKE_PREFIX_PATH=/usr/local
+    #
+    # In theory this setting should already be enabled by default
+    # (see "this behavior is enabled by default if CMAKE_MINIMUM_REQUIRED_VERSION is 3.1 or later" on
+    # <https://cmake.org/cmake/help/v3.1/module/FindPkgConfig.html#variable:PKG_CONFIG_USE_CMAKE_PREFIX_PATH>)
+    # because this `CMakeLists.txt` file specifies:
+    #
+    #   cmake_minimum_required(VERSION 3.3)
+    #
+    # But after the call to `project()` the value of `CMAKE_MINIMUM_REQUIRED_VERSION`
+    # seems to be overwritten by the value `3.0.0` as specified in
+    # `emscripten/1.37.28/cmake/Modules/Platform/Emscripten.cmake`. I
+    # thought CMake scoping rules prevented that from happening but it
+    # appears this is not the case. Which leads to rather confusing behaviour...
+    #
+    set(PKG_CONFIG_USE_CMAKE_PREFIX_PATH 1)
+
+
+    # Prevents warning from Emscripten that dynamic libraries
+    # are "currently not supported".
+    set(CMAKE_SHARED_LIBRARY_SUFFIX ".bc")
+
+    # Ensures examples/tests produce HTML + JavaScript files.
+    SET(CMAKE_EXECUTABLE_SUFFIX ".html")
+
+
+    # Note: It's not entirely clear to me what approach is best for
+    # specifying the Emscripten `-s` options below. It seems that it's
+    # not enough, for example, to use `add_compile_options(-s WASM=1)`
+    # but `link_libraries("-s WASM=1")` is sufficient--even though
+    # `-s` seems more like a compiler flag.
+
+    # Ensure WebAssembly is generated rather than asm.js.
+    link_libraries("-s WASM=1")
+
+    # Improves debug-ability of exceptions.
+    link_libraries("-s ASSERTIONS=1")
+
+    # Don't require memory size to be specified upfront.
+    # Only required by STL export example but presumably useful generally.
+    link_libraries("-s ALLOW_MEMORY_GROWTH=1")
+
+    #link_libraries("-s ENVIRONMENT=web")
+    #link_libraries("-s SINGLE_FILE=1")
+    #link_libraries("-lembind")
+    #link_libraries("-s MODULARIZE")
+    #link_libraries("-s EXPORTED_FUNCTIONS=_malloc,_free")
+    #link_libraries("-s EXPORT_NAME=createModule")
+
+    # Ensure libfive library uses WebAssembly port of libpng.
+    # Note: This should really only be in the library-specific `CMakeLists.txt`.
+    # add_compile_options(-s USE_LIBPNG=1)
+
+    add_compile_options("SHELL:-s USE_LIBPNG=1" "SHELL:-s USE_BOOST_HEADERS=1")
+
+endif()
+
+
 # Properly distinguish between Apple and upstream Clang
 cmake_policy(SET CMP0025 NEW)
 include(CheckCXXCompilerFlag)
@@ -48,12 +157,14 @@ endif()
 ################################################################################
 
 if(NOT MSVC)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -g -fPIC -pedantic -Werror=switch")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -fPIC -pedantic -Werror=switch")
 
-    # Sometimes this flag is not supported (e.g. on Apple Silicon)
-    check_cxx_compiler_flag("-march=native" MARCH_SUPPORTED)
-    if(MARCH_SUPPORTED)
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
+    if (LIBFIVE_WITH_MARCH_NATIVE)
+        # Sometimes this flag is not supported (e.g. on Apple Silicon)
+        check_cxx_compiler_flag("-march=native" MARCH_SUPPORTED)
+        if(MARCH_SUPPORTED)
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
+        endif()
     endif()
 
     set(CMAKE_CXX_FLAGS_DEBUG "-O0")
@@ -76,7 +187,7 @@ if(APPLE)
 endif()
 
 # Work around an issue with Boost::Interval on OpenBSD and MinGW on Windows
-if ("${CMAKE_SYSTEM_NAME}" STREQUAL "OpenBSD" OR MINGW)
+if ("${CMAKE_SYSTEM_NAME}" STREQUAL "OpenBSD" OR MINGW OR LIBFIVE_WITH_ISOC99_HW_ROUNDING)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__USE_ISOC99")
 endif()
 
@@ -115,7 +226,7 @@ if (BUILD_STUDIO_APP)
     endif()
 endif()
 
-if (UNIX AND NOT(APPLE))
+if (LIBFIVE_FIND_PKG_THREADS AND (UNIX AND NOT(APPLE)))
     find_package(Threads REQUIRED)
     set(CMAKE_CXX_LINK_FLAGS "${CMAKE_CXX_LINK_FLAGS} -latomic")
 endif(UNIX AND NOT(APPLE))
