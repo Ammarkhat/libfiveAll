@@ -1,7 +1,7 @@
 #include <emscripten/bind.h>
 
-#include <iostream>
-#include <iterator>
+// #include <iostream>
+// #include <iterator>
 
 #include "libfive.h"
 #include "libfive/solve/bounds.hpp"
@@ -13,25 +13,33 @@ const float OUTPUT_RESOLUTION = 15.0;
 
 using namespace emscripten;
 
-void meshImplicitFunction() {
-    
-  std::cout << "libfive Revision: " << libfive_git_branch() << " " << libfive_git_version() << " " << libfive_git_revision() << "\n";
+Kernel::Tree sphere(float radius, float cx, float cy, float cz){
+  auto x = Kernel::Tree::X() - Kernel::Tree(cx);
+  auto y = Kernel::Tree::Y() - Kernel::Tree(cy);
+  auto z = Kernel::Tree::Z() - Kernel::Tree(cz);
 
-  auto x = Kernel::Tree::X();
-  auto y = Kernel::Tree::Y();
-  auto z = Kernel::Tree::Z();
-
-  // auto r = Kernel::Tree(*std::istream_iterator<float>(std::cin));
-  auto r = Kernel::Tree(2.0f);
-
+  auto r = Kernel::Tree(radius);
   auto out = (x * x) + (y * y) + (z * z) - r;
+  return out;
+}
 
-  std::cout << "Tree: " << libfive_tree_print(&out) << "\n";
+void meshImplicitFunction(std::string implicitString) {
+    
+  // std::cout << "libfive Revision: " << libfive_git_branch() << " " << libfive_git_version() << " " << libfive_git_revision() << "\n";
+
+  // std::cout << "received implicit string: "<< implicitString<<"\n"; 
+
+  auto sphere1 = sphere(2, 0,0,0);
+  // auto sphere2 = sphere(2, 1,0,0);
+  // auto out = sphere1->union(sphere2);
+  auto out = sphere1;
+
+  // std::cout << "Tree: " << libfive_tree_print(&out) << "\n";
 
   // The value for `max_err` is cargo-culted from its default value.
   Kernel::Mesh::render(out, findBounds(out), 1.0/OUTPUT_RESOLUTION, 1e-8, false)->saveSTL(OUTPUT_FILENAME);
 
-  std::cout << "Exported file: " << OUTPUT_FILENAME << "\n";
+  // std::cout << "Exported file: " << OUTPUT_FILENAME << "\n";
 
 }
 

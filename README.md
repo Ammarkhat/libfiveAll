@@ -15,7 +15,7 @@ Building:
 
  * Install & enable `emsdk` as per <http://webassembly.org/getting-started/developers-guide/>.
 
- * Clone <https://github.com/Omniblox/libfive/tree/add-web-assembly-support>.
+ * Clone <https://github.com/Ammarkhat/libfiveAll/tree/add-web-assembly-support>.
 
  * At root of `libfive` repository:
 
