@@ -1,153 +1,158 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
+
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #include <future>
 
 #include "catch.hpp"
 
-#include "libfive/render/brep/xtree.hpp"
+#include "libfive/eval/evaluator.hpp"
+#include "libfive/render/brep/settings.hpp"
+#include "libfive/render/brep/dc/dc_tree.hpp"
+#include "libfive/render/brep/dc/dc_worker_pool.hpp"
 #include "libfive/render/axes.hpp"
 #include "util/shapes.hpp"
 
-using namespace Kernel;
+using namespace libfive;
 
-TEST_CASE("XTree<2>::vert")
+TEST_CASE("DCTree<2>::vert")
 {
     SECTION("Vertex positioning (with two planes)")
     {
         Tree a = min(Tree::X() + 0.1, Tree::Y() - 0.2);
-        auto ta = XTree<2>::build(a, Region<2>({-3, -3}, {1, 1}));
+        auto ta = DCWorkerPool<2>::build(a, Region<2>({-3, -3}, {1, 1}), BRepSettings());
         REQUIRE(ta->vert().x() == Approx(-0.1));
         REQUIRE(ta->vert().y() == Approx(0.2));
     }
 }
 
-TEST_CASE("XTree<2>::type")
+TEST_CASE("DCTree<2>::type")
 {
     SECTION("Empty")
     {
         Tree a = min(Tree::X(), Tree::Y());
-        auto e = XTree<2>::build(a, Region<2>({1, 1}, {2, 2}));
+        auto e = DCWorkerPool<2>::build(a, Region<2>({1, 1}, {2, 2}), BRepSettings());
         REQUIRE(e->type == Interval::EMPTY);
     }
 
     SECTION("Filled")
     {
         Tree a = min(Tree::X(), Tree::Y());
-        auto e = XTree<2>::build(a, Region<2>({-3, -3}, {-1, -1}));
+        auto e = DCWorkerPool<2>::build(a, Region<2>({-3, -3}, {-1, -1}), BRepSettings());
         REQUIRE(e->type == Interval::FILLED);
     }
 
     SECTION("Containing corner")
     {
         Tree a = min(Tree::X(), Tree::Y());
-        auto ta = XTree<2>::build(a, Region<2>({-3, -3}, {1, 1}));
+        auto ta = DCWorkerPool<2>::build(a, Region<2>({-3, -3}, {1, 1}), BRepSettings());
         REQUIRE(ta->type == Interval::AMBIGUOUS);
     }
 }
 
-TEST_CASE("XTree<2>::isBranch")
+TEST_CASE("DCTree<2>::isBranch")
 {
     SECTION("Empty")
     {
         Tree a = min(Tree::X(), Tree::Y());
-        auto e = XTree<2>::build(a, Region<2>({1, 1}, {2, 2}));
+        auto e = DCWorkerPool<2>::build(a, Region<2>({1, 1}, {2, 2}), BRepSettings());
         REQUIRE(!e->isBranch());
     }
 
     SECTION("Filled")
     {
         Tree a = min(Tree::X(), Tree::Y());
-        auto e = XTree<2>::build(a, Region<2>({-3, -3}, {-1, -1}));
+        auto e = DCWorkerPool<2>::build(a, Region<2>({-3, -3}, {-1, -1}), BRepSettings());
         REQUIRE(!e->isBranch());
     }
 
     SECTION("Containing line")
     {
-        auto e = XTree<2>::build(Tree::X(), Region<2>({-2, -2}, {2, 2}));
+        auto e = DCWorkerPool<2>::build(Tree::X(), Region<2>({-2, -2}, {2, 2}), BRepSettings());
         REQUIRE(!e->isBranch());
     }
 
     SECTION("Containing corner")
     {
         Tree a = min(Tree::X(), Tree::Y());
-        auto ta = XTree<2>::build(a, Region<2>({-3, -3}, {1, 1}));
+        auto ta = DCWorkerPool<2>::build(a, Region<2>({-3, -3}, {1, 1}),
+                                   BRepSettings());
         REQUIRE(!ta->isBranch());
     }
 
     SECTION("Containing shape")
     {
-        auto t = XTree<2>::build(circle(0.5), Region<2>({-1, -1}, {1, 1}));
+        auto t = DCWorkerPool<2>::build(circle(0.5), Region<2>({-1, -1}, {1, 1}),
+                                  BRepSettings());
         REQUIRE(t->isBranch());
     }
 }
 
-TEST_CASE("XTree<2>::rank")
+TEST_CASE("DCTree<2>::rank()")
 {
     SECTION("Containing line")
     {
-        auto e = XTree<2>::build(Tree::X(), Region<2>({-2, -2}, {2, 2}));
-        REQUIRE(e->rank == 1);
+        auto e = DCWorkerPool<2>::build(Tree::X(), Region<2>({-2, -2}, {2, 2}),
+                                  BRepSettings());
+        REQUIRE(e->rank() == 1);
     }
 
     SECTION("Containing corner")
     {
         Tree a = min(Tree::X(), Tree::Y());
-        auto ta = XTree<2>::build(a, Region<2>({-3, -3}, {1, 1}));
-        REQUIRE(ta->rank == 2);
+        auto ta = DCWorkerPool<2>::build(a, Region<2>({-3, -3}, {1, 1}),
+                                   BRepSettings());
+        REQUIRE(ta->rank() == 2);
     }
 }
 
-TEST_CASE("XTree<2>::vertex_count")
+TEST_CASE("DCTree<2>::vertex_count")
 {
+    BRepSettings settings;
+    settings.min_feature = 100;
+
     SECTION("Single corner")
     {
         Tree a = min(Tree::X(), Tree::Y());
-        auto ta = XTree<2>::build(a, Region<2>({-3, -3}, {3, 3}), 100);
-        REQUIRE(ta->rank == 2);
-        REQUIRE(ta->level == 0);
-        REQUIRE(ta->vertex_count == 1);
+
+        auto ta = DCWorkerPool<2>::build(a, Region<2>({-3, -3}, {3, 3}), settings);
+        REQUIRE(ta->rank() == 2);
+        REQUIRE(ta->level() == 0);
+        REQUIRE(ta->leaf != nullptr);
+        REQUIRE(ta->leaf->vertex_count == 1);
     }
     SECTION("Diagonally opposite corners")
     {
         Tree a = min(max(Tree::X(), Tree::Y()),
                      max(1 - Tree::X(), 1 - Tree::Y()));
-        auto tape = std::make_shared<Tape>(a);
-        PointEvaluator eval(tape);
-        auto ta = XTree<2>::build(a, Region<2>({-3, -3}, {3, 3}), 100);
-        REQUIRE(ta->level == 0);
-        REQUIRE(ta->vertex_count == 2);
-        for (unsigned i=0; i < ta->vertex_count; ++i)
+        ArrayEvaluator eval(a);
+        auto ta = DCWorkerPool<2>::build(a, Region<2>({-3, -3}, {3, 3}), settings);
+        REQUIRE(ta->level() == 0);
+        REQUIRE(ta->leaf != nullptr);
+        REQUIRE(ta->leaf->vertex_count == 2);
+        for (unsigned i=0; i < ta->leaf->vertex_count; ++i)
         {
-            auto pt = ta->vert3(i).template cast<float>().eval();
+            auto pt = ta->vert(i).template cast<float>().eval();
             CAPTURE(i);
             CAPTURE(pt.transpose());
-            REQUIRE(fabs(eval.eval(pt)) < 1e-6);
+            Eigen::Vector3f v;
+            v << pt, 0.0f;
+            REQUIRE(fabs(eval.value(v)) < 1e-6);
         }
     }
 }
 
-TEST_CASE("XTree<3>::vert")
+TEST_CASE("DCTree<3>::vert")
 {
-    auto walk = [](std::unique_ptr<const XTree<3>>& xtree,
-                   XTreeEvaluator& eval, float err=0.001)
+    auto walk = [](Root<DCTree<3>>& xtree,
+                   Evaluator& eval, float err)
     {
-        std::list<const XTree<3>*> todo = {xtree.get()};
+        std::list<const DCTree<3>*> todo = {xtree.get()};
         while (todo.size())
         {
             auto t = todo.front();
@@ -156,24 +161,24 @@ TEST_CASE("XTree<3>::vert")
             {
                 for (auto& c : t->children)
                 {
-                    todo.push_back(c.get());
+                    todo.push_back(c.load());
                 }
             }
             if (!t->isBranch() && t->type == Interval::AMBIGUOUS)
             {
-                for (unsigned i=0; i < t->vertex_count; ++i)
+                for (unsigned i=0; i < t->leaf->vertex_count; ++i)
                 {
+                    REQUIRE(t->leaf != nullptr);
+
                     CAPTURE(t->vert(i).transpose());
-                    CAPTURE(t->rank);
-                    CAPTURE(t->level);
-                    CAPTURE(t->vertex_count);
+                    CAPTURE(t->rank());
+                    CAPTURE(t->level());
+                    CAPTURE(t->leaf->vertex_count);
                     CAPTURE(i);
-                    CAPTURE(t->manifold);
-                    CAPTURE((int)t->corner_mask);
-                    CAPTURE(t->region.lower.transpose());
-                    CAPTURE(t->region.upper.transpose());
-                    REQUIRE(eval.feature.eval(t->vert3(i).template cast<float>())
-                            == Approx(0).epsilon(err));
+                    CAPTURE(t->leaf->manifold);
+                    CAPTURE((int)t->leaf->corner_mask);
+                    REQUIRE(eval.value(t->vert(i).template cast<float>())
+                            == Approx(0.0f).margin(err));
                 }
             }
         }
@@ -183,51 +188,76 @@ TEST_CASE("XTree<3>::vert")
     {
         auto b = max(box({0, 0, 0}, {1, 1, 1}),
                 Tree::X() + Tree::Y() + Tree::Z() - 1.3);
-        XTreeEvaluator eval(b);
+        Evaluator eval(b);
         Region<3> r({-2, -2, -2}, {2, 2, 2});
-        auto xtree = XTree<3>::build(b, r, 0.1);
-        walk(xtree, eval);
+
+        BRepSettings settings;
+        settings.min_feature = 0.1;
+        auto xtree = DCWorkerPool<3>::build(b, r, settings);
+        walk(xtree, eval, 0.001);
     }
 
     SECTION("Another sliced box")
     {
         auto b = max(box({0, 0, 0}, {1, 1, 1}),
                 Tree::X() + Tree::Y() + Tree::Z() - 1.2);
-        XTreeEvaluator eval(b);
+        Evaluator eval(b);
         Region<3> r({-10, -10, -10}, {10, 10, 10});
-        auto xtree = XTree<3>::build(b, r, 0.1);
-        walk(xtree, eval);
+
+        BRepSettings settings;
+        settings.min_feature = 0.1;
+        auto xtree = DCWorkerPool<3>::build(b, r, settings);
+        walk(xtree, eval, 0.001);
     }
 
     SECTION("Sphere with circular cutout (manifoldness)")
     {
         auto s = max(sphere(1), -circle(0.5));
         Region<3> r({-5, -5, -5}, {5, 5, 5});
-        auto xtree = XTree<3>::build(s, r, 1/9.0f);
-        XTreeEvaluator eval(s);
+
+        BRepSettings settings;
+        settings.min_feature = 1 / 9.0f;
+        auto xtree = DCWorkerPool<3>::build(s, r, settings);
+        Evaluator eval(s);
+        walk(xtree, eval, 0.01);
+    }
+
+    SECTION("Nested rings with features on cell walls")
+    {
+        auto t = max(max(-Tree::Z(), max(circle(1), -circle(0.5))),
+                          Tree::Z() - 1);
+        Region<3> r({-2, -2, -2}, {2, 2, 2});
+
+        BRepSettings settings;
+        settings.min_feature = 0.2;
+        auto xtree = DCWorkerPool<3>::build(t, r, settings);
+
+        Evaluator eval(t);
         walk(xtree, eval, 0.01);
     }
 }
 
-TEST_CASE("XTree<3> cancellation")
+TEST_CASE("DCTree<3> cancellation")
 {
     std::chrono::time_point<std::chrono::system_clock> start, end;
     std::chrono::duration<double> elapsed;
 
     Tree sponge = max(menger(2), -sphere(1, {1.5, 1.5, 1.5}));
     Region<3> r({-2.5, -2.5, -2.5}, {2.5, 2.5, 2.5});
-    std::atomic_bool cancel(false);
-    std::map<Tree::Id, float> vars;
+    Evaluator eval(sponge);
 
+    BRepSettings settings;
+    settings.min_feature = 0.02;
+    settings.workers = 1;
     // Start a long render operation, then cancel it immediately
     auto future = std::async(std::launch::async, [&](){
-        return XTree<3>::build(sponge, vars, r, 0.02, 8, true, cancel); });
+        return DCWorkerPool<3>::build(&eval, r, settings); });
 
     // Record how long it takes betwen triggering the cancel
     // and the future finishing, so we can check that the cancelling
     // ended the computation within some short amount of time.
     start = std::chrono::system_clock::now();
-    cancel.store(true);
+    settings.cancel.store(true);
     auto result = future.get();
     end = std::chrono::system_clock::now();
 
@@ -241,40 +271,16 @@ TEST_CASE("XTree<3> cancellation")
     REQUIRE(result.get() == nullptr);
 }
 
-TEST_CASE("XTree<3>::build (vertex positioning with vertices on octree walls)")
+TEST_CASE("DCTree::checkConsistency")
 {
-    auto t = max(max(-Tree::Z(), max(circle(1), -circle(0.5))),
-                      Tree::Z() - 1);
-
-    auto x = XTree<3>::build(t, Region<3>({-2, -2, -2}, {2, 2, 2}), 0.4);
-
-    std::list<std::pair<const XTree<3>*, const XTree<3>*>> targets = {
-        {x->child(0),       x->child(Axis::Z)},
-        {x->child(Axis::Y), x->child(Axis::Y|Axis::Z)},
-        {x->child(Axis::X), x->child(Axis::X|Axis::Z)},
-        {x->child(Axis::Y), x->child(Axis::Y|Axis::Z)},
-        {x->child(Axis::X|Axis::Y), x->child(Axis::X|Axis::Y|Axis::Z)}
-    };
-
-    while (targets.size())
+    SECTION("Sphere with circular cutout")
     {
-        auto p = targets.front();
-        targets.pop_front();
-        if (p.first->isBranch())
-        {
-            assert(p.second->isBranch());
-            targets.push_back({p.first->child(Axis::Z), p.second->child(0)});
-            targets.push_back({p.first->child(Axis::Y|Axis::Z), p.second->child(Axis::Y)});
-            targets.push_back({p.first->child(Axis::X|Axis::Z), p.second->child(Axis::X)});
-            targets.push_back({p.first->child(Axis::Y|Axis::Z), p.second->child(Axis::Y)});
-            targets.push_back({p.first->child(Axis::X|Axis::Y|Axis::Z), p.second->child(Axis::X|Axis::Y)});
-        }
-        else if (!p.second->isBranch() && p.first->vertex_count == 1 &&
-                                          p.second->vertex_count == 1)
-        {
-            CAPTURE(p.first->vert(0));
-            CAPTURE(p.second->vert(0));
-            REQUIRE((p.first->vert(0) - p.second->vert(0)).norm() < 1e-3);
-        }
+        auto s = max(sphere(1), -circle(0.5));
+        Region<3> r({-5, -5, -5}, {5, 5, 5});
+
+        BRepSettings settings;
+        settings.min_feature = 1 / 9.0f;
+        auto xtree = DCWorkerPool<3>::build(s, r, settings);
+        REQUIRE(xtree->checkConsistency());
     }
 }

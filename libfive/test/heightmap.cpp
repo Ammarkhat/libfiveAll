@@ -1,20 +1,11 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
+
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #include <chrono>
 
@@ -24,7 +15,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "util/shapes.hpp"
 
-using namespace Kernel;
+using namespace libfive;
 
 #define EPSILON 1e-6
 
@@ -267,26 +258,15 @@ TEST_CASE("Heightmap::render: Normal clipping ")
 
 TEST_CASE("Heightmap::render: Performance")
 {
-    std::chrono::time_point<std::chrono::system_clock> start, end;
-    std::chrono::duration<double> elapsed;
-
-    std::string log;
-
-    {   // Build and render sphere
+    BENCHMARK("sphere")
+    {
         Tree t = sphere(1);
-
         Voxels r({-1, -1, -1}, {1, 1, 1}, 500);
-
-        start = std::chrono::system_clock::now();
         auto out = render(t, r)->depth;
-        end = std::chrono::system_clock::now();
+    };
 
-        elapsed = end - start;
-
-        log += "Rendered sphere in " + std::to_string(elapsed.count()) + " sec";
-    }
-
-    {   // Build and render Menger sponge
+    BENCHMARK("Menger sponge")
+    {
         Tree sponge = menger(2);
 
         Voxels r({-2.5, -2.5, -2.5}, {2.5, 2.5, 2.5}, 250);
@@ -299,20 +279,6 @@ TEST_CASE("Heightmap::render: Performance")
             m(0,0)*Tree::X() + m(0,1)*Tree::Y() + m(0,2)*Tree::Z(),
             m(1,0)*Tree::X() + m(1,1)*Tree::Y() + m(1,2)*Tree::Z(),
             m(2,0)*Tree::X() + m(2,1)*Tree::Y() + m(2,2)*Tree::Z());
-
-        // Begin timekeeping
-        start = std::chrono::system_clock::now();
         auto heightmap = render(sponge_, r);
-        end = std::chrono::system_clock::now();
-
-        elapsed = end - start;
-
-        auto elapsed_ms =
-            std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
-
-        log += "\nRendered sponge in " +
-               std::to_string(elapsed.count()) + " sec";
-    }
-
-    WARN(log);
+    };
 }

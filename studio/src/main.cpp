@@ -20,27 +20,32 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include <QSurfaceFormat>
 
 #include "studio/app.hpp"
-#include "studio/editor.hpp"
-#include "studio/window.hpp"
-#include "studio/settings.hpp"
-#include "studio/shape.hpp"
+#include "studio/documentation.hpp"
+#include "studio/result.hpp"
+
+#ifdef Q_OS_MAC
+#include "studio/platform_darwin.hpp"
+#endif
+
+using namespace Studio;
 
 int main(int argc, char** argv)
 {
-    {   // Configure default OpenGL as 3.3 Core
+    {   // Configure default OpenGL as 3.2 Core
         QSurfaceFormat format;
-        format.setVersion(3, 3);
+        format.setVersion(3, 2);
         format.setProfile(QSurfaceFormat::CoreProfile);
         format.setSamples(8);
         QSurfaceFormat::setDefaultFormat(format);
     }
 
-    // Register settings and shape meta-types to be sent across threads
-    qRegisterMetaType<Settings>("Settings");
-    qRegisterMetaType<QList<Shape*>>("QList<Shape*>");
-    qRegisterMetaType<Editor::Range>("Editor::Range");
-    qRegisterMetaType<QMap<Kernel::Tree::Id,Editor::Range>>(
-            "QMap<Kernel::Tree::Id,Editor::Range>");
+    // Register metatypes to be sent between threads
+    qRegisterMetaType<Result>("Result");
+    qRegisterMetaType<Documentation>("Documentation");
+
+#ifdef Q_OS_MAC
+    PlatformDarwin::disableWindowTabbing();
+#endif
 
     App a(argc, argv);
     a.exec();

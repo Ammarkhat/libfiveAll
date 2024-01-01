@@ -2,36 +2,42 @@
 libfive: a CAD kernel for modeling with implicit functions
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #pragma once
 
 #include "libfive/tree/tree.hpp"
 #include "libfive/render/brep/region.hpp"
 
-namespace Kernel {
+#include <atomic>
+
+namespace libfive {
+
+// Forward declarations
+template <unsigned N> class PerThreadBRep;
+class Evaluator;
+struct BRepSettings;
 
 class Contours {
 public:
-    static std::unique_ptr<Contours> render(const Tree t, const Region<2>& r,
-                                            double min_feature=0.1);
+    /*
+     *  Generic render function
+     */
+    static std::unique_ptr<Contours> render(
+        const Tree& t, const Region<2>& r,
+        const BRepSettings& settings);
 
     /*
      *  Saves the contours to an SVG file
      */
     bool saveSVG(const std::string& filename);
+
+    /*
+     *  Merge together a set of contours, welding continuous paths
+     */
+    void collect(const std::vector<PerThreadBRep<2>>& children);
 
     /*  Contours in 2D space  */
     std::vector<std::vector<Eigen::Vector2f>> contours;
@@ -39,8 +45,11 @@ public:
     /*  Optional bounding box */
     Region<2> bbox;
 
+    /*  Empty constructor, used prior to calling collect() */
+    Contours() { /* Nothing to do here */ }
+
 protected:
     Contours(Region<2> bbox) : bbox(bbox) {}
 };
 
-}   // namespace Kernel
+}   // namespace libfive

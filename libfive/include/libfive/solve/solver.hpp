@@ -1,20 +1,11 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
+
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #pragma once
 #include <map>
@@ -22,10 +13,9 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include <Eigen/Eigen>
 
-#include "libfive/tree/cache.hpp"
 #include "libfive/eval/eval_jacobian.hpp"
 
-namespace Kernel {
+namespace libfive {
 
 class Tree;
 
@@ -45,9 +35,10 @@ namespace Solver
             const Eigen::Vector3f pos={0,0,0}, const Mask& mask=Mask(),
             unsigned gas=25000);
     std::pair<float, Solution> findRoot(
-            JacobianEvaluator& e, std::map<Tree::Id, float> vars,
+            JacobianEvaluator& e, const std::shared_ptr<Tape>& tape,
+            std::map<Tree::Id, float> vars,
             const Eigen::Vector3f pos={0,0,0}, const Mask& mask=Mask(),
             unsigned gas=25000);
 
 }   // namespace Solver
-}   // namespace Kernel
+}   // namespace libfive

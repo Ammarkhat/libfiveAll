@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include <QObject>
 #include <QPropertyAnimation>
 
+namespace Studio {
 class Camera : public QObject
 {
     Q_OBJECT
@@ -33,6 +34,20 @@ public:
      */
     void toOrthographic();
     void toPerspective();
+
+    /*
+     *  Triggers an animation of the axis member variable
+     */
+    void toTurnZ();
+    void toTurnY();
+
+    /*
+     *  Sets the mouse rotation sensitivity of the viewport 
+     *  in degrees per windown size. (Angle rotated for 
+     *  distance dragged across the screen, relative to the 
+     *  size of the window)
+     */
+    void setRotationSensitivity(float sensitivity);
 
     /*
      *  Triggers an animation to zoom to the given setting
@@ -75,14 +90,20 @@ signals:
     void animDone();
 
 protected:
+    void animateAxis(QQuaternion end);
 
     float scale=0.5;
     QVector3D center={0,0,0};
     float pitch=128;
     float yaw=-59;
+    float rotationSensitivity=360;
 
     float perspective=0.25;
     Q_PROPERTY(float perspective MEMBER perspective NOTIFY changed)
 
+    QQuaternion axis;
+    Q_PROPERTY(QQuaternion axis MEMBER axis NOTIFY changed)
+
     QPropertyAnimation anim;
 };
+} // namespace Studio

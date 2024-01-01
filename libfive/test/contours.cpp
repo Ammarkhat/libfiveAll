@@ -1,20 +1,11 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
+
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #include "catch.hpp"
 
@@ -22,10 +13,11 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "libfive/render/brep/contours.hpp"
 #include "libfive/render/brep/region.hpp"
+#include "libfive/render/brep/settings.hpp"
 
 #include "util/shapes.hpp"
 
-using namespace Kernel;
+using namespace libfive;
 
 TEST_CASE("Contours::render (segment welding)")
 {
@@ -33,7 +25,7 @@ TEST_CASE("Contours::render (segment welding)")
 
     Region<2> r({-1, -1}, {1, 1});
 
-    auto m = Contours::render(t, r);
+    auto m = Contours::render(t, r, BRepSettings());
     REQUIRE(m->contours.size() == 1);
 }
 
@@ -43,7 +35,7 @@ TEST_CASE("Contours::render (accuracy)")
 
     Region<2> r({-1, -1}, {1, 1});
 
-    auto m = Contours::render(t, r);
+    auto m = Contours::render(t, r, BRepSettings());
     REQUIRE(m->contours.size() == 1);
 
     float min = 1;
@@ -66,7 +58,7 @@ TEST_CASE("Contours::render (with ambiguities)")
                          max(-Tree::Y(), Tree::Y() - 1)),
                 -Tree::X());
 
-    auto m = Contours::render(t, r);
+    auto m = Contours::render(t, r, BRepSettings());
     REQUIRE(m->contours.size() == 1);
     REQUIRE(m->contours[0] == m->contours[m->contours.size() - 1]);
 }
@@ -76,10 +68,10 @@ TEST_CASE("Contours::render (adjacent rectangles)")
     auto rects = min(rectangle(-1, 0, -1, 1), rectangle(0, 1, -1, 1));
     Region<2> r({-2, -2}, {2, 2});
 
-    auto cs_pos = Contours::render(rects, r);
+    auto cs_pos = Contours::render(rects, r, BRepSettings());
     REQUIRE(cs_pos->contours.size() == 1);
 
-    auto cs_neg = Contours::render(-rects, r);
+    auto cs_neg = Contours::render(-rects, r, BRepSettings());
     REQUIRE(cs_neg->contours.size() == 1);
 }
 
@@ -88,6 +80,6 @@ TEST_CASE("Contours::render (menger, perp offset)")
     auto m = menger(2);
     Region<2> r({-2.5, -2.5}, {2.5, 2.5}, Eigen::Array<double, 1, 1>(1.49));
 
-    auto cs = Contours::render(m, r);
+    auto cs = Contours::render(m, r, BRepSettings());
     REQUIRE(cs->contours.size() == 74);
 }

@@ -1,179 +1,127 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
+
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #include <numeric>
 #include <fstream>
 #include <boost/algorithm/string/predicate.hpp>
 
+#include "libfive/eval/evaluator.hpp"
+
 #include "libfive/render/brep/mesh.hpp"
-#include "libfive/render/brep/xtree.hpp"
 #include "libfive/render/brep/dual.hpp"
+#include "libfive/render/brep/region.hpp"
+#include "libfive/render/brep/settings.hpp"
 
-namespace Kernel {
+// Dual contouring
+#include "libfive/render/brep/dc/dc_worker_pool.hpp"
+#include "libfive/render/brep/dc/dc_mesher.hpp"
 
-template <Axis::Axis A, bool D>
-void Mesh::load(const std::array<const XTree<3>*, 4>& ts)
+// Simplex meshing
+#include "libfive/render/brep/simplex/simplex_worker_pool.hpp"
+#include "libfive/render/brep/simplex/simplex_mesher.hpp"
+
+// Hybrid meshing
+#include "libfive/render/brep/hybrid/hybrid_worker_pool.hpp"
+#include "libfive/render/brep/hybrid/hybrid_mesher.hpp"
+
+namespace libfive {
+
+std::unique_ptr<Mesh> Mesh::render(const Tree& t_, const Region<3>& r,
+                                   const BRepSettings& settings)
 {
-    int es[4];
-    {   // Unpack edge vertex pairs into edge indices
-        auto q = Axis::Q(A);
-        auto r = Axis::R(A);
-        std::vector<std::pair<unsigned, unsigned>> ev = {
-            {q|r, q|r|A},
-            {r, r|A},
-            {q, q|A},
-            {0, A}};
-        for (unsigned i=0; i < 4; ++i)
-        {
-            es[i] = XTree<3>::mt->e[D ? ev[i].first  : ev[i].second]
-                                   [D ? ev[i].second : ev[i].first];
-            assert(es[i] != -1);
-        }
+    std::vector<Evaluator, Eigen::aligned_allocator<Evaluator>> es;
+    es.reserve(settings.workers);
+    const auto t = t_.optimized();
+    for (unsigned i=0; i < settings.workers; ++i) {
+        es.emplace_back(Evaluator(t));
     }
 
-    uint32_t vs[4];
-    for (unsigned i=0; i < ts.size(); ++i)
-    {
-        // Load either a patch-specific vertex (if this is a lowest-level,
-        // potentially non-manifold cell) or the default vertex
-        auto vi = ts[i]->level > 0
-            ? 0
-            : XTree<3>::mt->p[ts[i]->corner_mask][es[i]];
-        assert(vi != -1);
-
-        // Sanity-checking manifoldness of collapsed cells
-        assert(ts[i]->level == 0 || ts[i]->vertex_count == 1);
-
-        if (ts[i]->index[vi] == 0)
-        {
-            ts[i]->index[vi] = verts.size();
-
-            verts.push_back(ts[i]->vert(vi).template cast<float>());
-        }
-        vs[i] = ts[i]->index[vi];
-    }
-
-    // Handle polarity-based windings
-    if (!D)
-    {
-        std::swap(vs[1], vs[2]);
-    }
-
-    // Pick a triangulation that prevents triangles from folding back
-    // on each other by checking normals.
-    std::array<Eigen::Vector3f, 4> norms;
-
-    // Computes and saves a corner normal.  a,b,c must be right-handed
-    // according to the quad winding, which looks like
-    //     2---------3
-    //     |         |
-    //     |         |
-    //     0---------1
-    auto saveNorm = [&](int a, int b, int c){
-        norms[a] = (verts[vs[b]] - verts[vs[a]]).cross
-                   (verts[vs[c]] - verts[vs[a]]).normalized();
-    };
-    saveNorm(0, 1, 2);
-    saveNorm(1, 3, 0);
-    saveNorm(2, 0, 3);
-    saveNorm(3, 2, 1);
-    if (norms[0].dot(norms[3]) > norms[1].dot(norms[2]))
-    {
-        branes.push_back({vs[0], vs[1], vs[2]});
-        branes.push_back({vs[2], vs[1], vs[3]});
-    }
-    else
-    {
-        branes.push_back({vs[0], vs[1], vs[3]});
-        branes.push_back({vs[0], vs[3], vs[2]});
-    }
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-std::unique_ptr<Mesh> Mesh::render(const Tree t, const Region<3>& r,
-                                   double min_feature, double max_err,
-                                   bool multithread)
-{
-    std::atomic_bool cancel(false);
-    std::map<Tree::Id, float> vars;
-    return render(t, vars, r, min_feature, max_err, multithread, cancel);
+    return render(es.data(), r, settings);
 }
 
 std::unique_ptr<Mesh> Mesh::render(
-            const Tree t, const std::map<Tree::Id, float>& vars,
-            const Region<3>& r, double min_feature, double max_err,
-            bool multithread, std::atomic_bool& cancel)
+        Evaluator* es,
+        const Region<3>& r, const BRepSettings& settings)
 {
-    // Create the octree (multithreaded and cancellable)
-    return mesh(XTree<3>::build(
-            t, vars, r, min_feature, max_err, multithread, cancel), cancel);
-}
-
-std::unique_ptr<Mesh> Mesh::render(
-        XTreeEvaluator* es,
-        const Region<3>& r, double min_feature, double max_err,
-        std::atomic_bool& cancel)
-{
-    return mesh(XTree<3>::build(es, r, min_feature, max_err, true, cancel),
-                cancel);
-}
-
-std::unique_ptr<Mesh> Mesh::mesh(std::unique_ptr<const XTree<3>> xtree,
-                                 std::atomic_bool& cancel)
-{
-    // Perform marching squares
-    auto m = std::unique_ptr<Mesh>(new Mesh());
-
-    if (cancel.load())
+    std::unique_ptr<Mesh> out;
+    if (settings.alg == DUAL_CONTOURING)
     {
-        return nullptr;
-    }
-    else
-    {
-        Dual<3>::walk(xtree.get(), *m);
-
-#if DEBUG_OCTREE_CELLS
-        // Store octree cells as lines
-        std::list<const XTree<3>*> todo = {xtree.get()};
-        while (todo.size())
-        {
-            auto t = todo.front();
-            todo.pop_front();
-            if (t->isBranch())
-                for (auto& c : t->children)
-                    todo.push_back(c.get());
-
-            static const std::vector<std::pair<uint8_t, uint8_t>> es =
-                {{0, Axis::X}, {0, Axis::Y}, {0, Axis::Z},
-                 {Axis::X, Axis::X|Axis::Y}, {Axis::X, Axis::X|Axis::Z},
-                 {Axis::Y, Axis::Y|Axis::X}, {Axis::Y, Axis::Y|Axis::Z},
-                 {Axis::X|Axis::Y, Axis::X|Axis::Y|Axis::Z},
-                 {Axis::Z, Axis::Z|Axis::X}, {Axis::Z, Axis::Z|Axis::Y},
-                 {Axis::Z|Axis::X, Axis::Z|Axis::X|Axis::Y},
-                 {Axis::Z|Axis::Y, Axis::Z|Axis::Y|Axis::X}};
-            for (auto e : es)
-                m->line(t->cornerPos(e.first).template cast<float>(),
-                        t->cornerPos(e.second).template cast<float>());
+        if (settings.progress_handler) {
+            // Pool::build, Dual::walk, t.reset
+            settings.progress_handler->start({1, 1, 1});
         }
-#endif
-        return m;
+        auto t = DCWorkerPool<3>::build(es, r, settings);
+
+        if (settings.cancel.load() || t.get() == nullptr) {
+            if (settings.progress_handler) {
+                settings.progress_handler->finish();
+            }
+            return nullptr;
+        }
+
+        // Perform marching squares
+        out = Dual<3>::walk<DCMesher>(t, settings);
+
+        // TODO: check for early return here again
+        t.reset(settings);
     }
+    else if (settings.alg == ISO_SIMPLEX)
+    {
+        if (settings.progress_handler) {
+            // Pool::build, Dual::walk, t->assignIndices, t.reset
+            settings.progress_handler->start({1, 1, 1});
+        }
+        auto t = SimplexWorkerPool<3>::build(es, r, settings);
+
+        if (settings.cancel.load() || t.get() == nullptr) {
+            if (settings.progress_handler) {
+                settings.progress_handler->finish();
+            }
+            return nullptr;
+        }
+
+        t->assignIndices(settings);
+
+        out = Dual<3>::walk_<SimplexMesher>(t, settings,
+                [&](PerThreadBRep<3>& brep, int i) {
+                    return SimplexMesher(brep, &es[i]);
+                });
+        t.reset(settings);
+    }
+    else if (settings.alg == HYBRID)
+    {
+        if (settings.progress_handler) {
+            // Pool::build, Dual::walk, t->assignIndices, t.reset
+            settings.progress_handler->start({1, 1, 1});
+        }
+        auto t = HybridWorkerPool<3>::build(es, r, settings);
+
+        if (settings.cancel.load() || t.get() == nullptr) {
+            if (settings.progress_handler) {
+                settings.progress_handler->finish();
+            }
+            return nullptr;
+        }
+
+        t->assignIndices(settings);
+
+        out = Dual<3>::walk_<HybridMesher>(t, settings,
+                [&](PerThreadBRep<3>& brep, int i) {
+                    return HybridMesher(brep, &es[i]);
+                });
+        t.reset(settings);
+    }
+
+    if (settings.progress_handler) {
+        settings.progress_handler->finish();
+    }
+    return out;
 }
 
 void Mesh::line(const Eigen::Vector3f& a, const Eigen::Vector3f& b)
@@ -245,9 +193,9 @@ bool Mesh::saveSTL(const std::string& filename,
     return true;
 }
 
-bool Mesh::saveSTL(const std::string& filename)
+bool Mesh::saveSTL(const std::string& filename) const
 {
     return saveSTL(filename, {this});
 }
 
-}   // namespace Kernel
+}   // namespace libfive

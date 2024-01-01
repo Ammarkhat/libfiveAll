@@ -1,145 +1,77 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
+
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #include "libfive/eval/feature.hpp"
 
-namespace Kernel {
+namespace libfive {
 
-bool Feature::isCompatible(const Eigen::Vector3d& e) const
+Feature::Feature(const Eigen::Vector3f& d)
+    : deriv(d)
 {
-    const auto norm = e.norm();
-    return (norm == 0) ? false : isCompatibleNorm(e / norm);
+    // Nothing to do here
 }
 
-bool Feature::isCompatibleNorm(const Eigen::Vector3d& e) const
+Feature::Feature(const Eigen::Vector3f& d, const Feature& a)
+    : deriv(d), epsilons(a.epsilons)
 {
-    if (epsilons.size() == 0)
-    {
-        return true;
-    }
-    else if (epsilons.size() == 1)
-    {
-        return e.dot(epsilons.front()) != -1;
-    }
+    // Nothing to do here
+}
 
-    // Return early if the epsilon is already in the list
-    for (const auto& i : epsilons)
+Feature::Feature(const Eigen::Vector3f& d, const Feature& a, const Feature& b)
+    : deriv(d), epsilons(a.epsilons)
+{
+    // Merge and deduplicate epsilons
+    // This is O(N^2), but it should be fine for small N
+    for (auto& e : b.epsilons)
     {
-        if (e.dot(i) > 1 - 1e-8)
+        bool found = false;
+        for (auto& e_ : epsilons)
         {
-            return true;
-        }
-    }
-
-    // Special case for 2D (planar) sets of points
-    switch (checkPlanar(e))
-    {
-        case PLANAR_FAIL: return false;
-        case PLANAR_SUCCESS: return true;
-        case NOT_PLANAR: break;
-    }
-
-    // Otherwise, we construct every possible plane and check against
-    // every remaining point to make sure they work
-    auto es = epsilons;
-    es.push_back(e);
-
-    // Yes, this is an O(n^3) loop
-    // It's far from optimal, but will suffice unless people start making
-    // deliberately pathological models.
-    for (auto a=es.begin(); a != es.end(); ++a)
-    {
-        for (auto b=es.begin(); b != es.end(); ++b)
-        {
-            if (a == b || a->dot(*b) == -1)
+            if (e == e_)
             {
-                continue;
-            }
-            const auto norm = a->cross(*b);
-            int sign = 0;
-            bool passed = true;
-            for (auto c=es.begin(); passed && c != es.end(); ++c)
-            {
-                if (a == c || b == c)
-                {
-                    continue;
-                }
-                auto d = norm.dot(*c);
-                if (d < 0)
-                {
-                    passed &= (sign <= 0);
-                    sign = -1;
-                }
-                else if (d > 0)
-                {
-                    passed &= (sign >= 0);
-                    sign = 1;
-                }
-                else
-                {
-                    passed = false;
-                }
-            }
-            if (passed)
-            {
-                return true;
+                found = true;
+                break;
             }
         }
-    }
-    return false;
-}
 
-void Feature::pushRaw(Choice c, const Eigen::Vector3d& _v)
-{
-    Eigen::Vector3d v = _v.normalized();
-
-    epsilons.push_back(v);
-    choices.insert(c);
-    _epsilons[c.id] = v;
-}
-
-void Feature::pushChoice(Choice c)
-{
-    choices.insert(c);
-}
-
-bool Feature::push(const Eigen::Vector3d& e, Choice choice)
-{
-    const auto norm = e.norm();
-    return (norm == 0) ? false : pushNorm(e / norm, choice);
-}
-
-bool Feature::pushNorm(const Eigen::Vector3d& e, Choice choice)
-{
-    if (isCompatibleNorm(e))
-    {
-        choices.insert(choice);
-        _epsilons[choice.id] = e;
-
-        // Store the epsilon if it isn't already present
-        for (auto& i : epsilons)
+        if (!found)
         {
-            if (e.dot(i) > 1 - 1e-8)
-            {
-                return true;
-            }
+            epsilons.push_back(e);
         }
-        epsilons.push_back(e);
+    }
+}
+
+Feature::Feature(const Feature& a, const Eigen::Matrix3f& transform)
+    : deriv(transform * a.deriv), epsilons(a.epsilons)
+{
+    for (auto& e : epsilons)
+    {
+        e = transform * e;
+    }
+}
+
+bool Feature::push(const Eigen::Vector3f& e_)
+{
+    const auto norm = e_.norm();
+    if (norm == 0)
+    {
+        return false;
+    }
+
+    Eigen::Vector3f e = e_ / norm;
+    bool dup = false;
+    if (check(e, &dup))
+    {
+        if (!dup)
+        {
+            epsilons.push_back(e);
+        }
         return true;
     }
     else
@@ -148,47 +80,205 @@ bool Feature::pushNorm(const Eigen::Vector3d& e, Choice choice)
     }
 }
 
-bool operator<(const Feature::Choice& a, const Feature::Choice& b)
+bool Feature::push(const Feature& other)
 {
-    if (a.id != b.id)
-    {
-        return a.id < b.id;
-    }
-    return a.choice < b.choice;
-}
-
-Feature::PlanarResult Feature::checkPlanar(const Eigen::Vector3d& _v) const
-{
-    if (epsilons.size() < 2)
-    {
-        return NOT_PLANAR;
-    }
-
-    Eigen::Vector3d v = _v.normalized();
-
-    auto itr = epsilons.begin();
-    const auto cross = itr->cross(v);
-    const auto cross_ = cross.normalized();
-
-    const auto angle = asin(cross.norm());
-    auto angle_min = std::min(0.0, angle);
-    auto angle_max = std::max(0.0, angle);
-
-    while (++itr != epsilons.end())
-    {
-        auto c = itr->cross(v);
-        auto c_ = c.normalized();
-        if (std::abs(c_.dot(cross_)) != 1)
-        {
-            return NOT_PLANAR;
+    for (auto& e : other.epsilons) {
+        if (!push(e)) {
+            return false;
         }
-
-        const auto angle = asin(c.norm());
-        angle_min = std::min(angle, angle_min);
-        angle_max = std::max(angle, angle_max);
     }
-
-    return (angle_max - angle_min > M_PI) ? PLANAR_FAIL : PLANAR_SUCCESS;
+    return true;
 }
 
-}   // namespace Kernel
+bool Feature::check(const Feature& other) const
+{
+    auto temp = *this;
+    return std::all_of(other.epsilons.begin(), other.epsilons.end(),
+            [&](const Eigen::Vector3f& e){ return temp.push(e); });
+}
+
+bool Feature::check(const Eigen::Vector3f& e, bool* duplicate) const
+{
+    // Return early if the epsilon is already in the list
+    for (const auto& i : epsilons)
+    {
+        if (e.dot(i) > 1 - 1e-8)
+        {
+            if (duplicate)
+            {
+                *duplicate = true;
+            }
+            return true;
+        }
+    }
+
+    if (epsilons.size() == 0)
+    {
+        return true;
+    }
+    if (epsilons.size() == 1)
+    {
+        return (e.dot(epsilons.front()) != -1);
+    }
+
+    // Construct a potential set of epsilons, which includes the new point
+    auto es = epsilons;
+    es.push_back(e);
+
+    // Each epsilon implies a plane.  The intersection of all of these
+    // which is a polyhedral convex cone.  We want to check whether the
+    // cone is empty or not.  To do so, we build a bounded polytope by
+    // intersecting the cone with a small cube, then check every possible
+    // vertex to see if it's valid.  If the only valid vertex is at the
+    // origin, then the cone is empty.
+    //
+    // This is not particularly inefficient, and could be replaced with
+    // a linear programming system, but N should be relatively small.
+
+    // These are the planes of the polytope, in the form n * x = d
+    using boost::container::small_vector;
+    small_vector<std::pair<Eigen::Vector3f, float>, 16> planes;
+    for (const auto& e : es) {
+        planes.push_back(std::make_pair(e, 0.0));
+    }
+    // Add the six planes defining the cube
+    planes.push_back(std::make_pair(Eigen::Vector3f(1, 0, 0), 1));
+    planes.push_back(std::make_pair(Eigen::Vector3f(-1, 0, 0), 1));
+    planes.push_back(std::make_pair(Eigen::Vector3f(0, 1, 0), 1));
+    planes.push_back(std::make_pair(Eigen::Vector3f(0, -1, 0), 1));
+    planes.push_back(std::make_pair(Eigen::Vector3f(0, 0, 1), 1));
+    planes.push_back(std::make_pair(Eigen::Vector3f(0, 0, -1), 1));
+
+    // We build the polytope corners with an expensive loop
+    small_vector<Eigen::Vector3f, 32> corners;
+    for (unsigned i=0; i < planes.size(); ++i) {
+        for (unsigned j=i; j < planes.size(); ++j) {
+            for (unsigned k=j; k < planes.size(); ++k) {
+                const auto a = planes[i];
+                const auto b = planes[j];
+                const auto c = planes[k];
+
+                // Skip corners that are entirely from cone planes, which
+                // have a degenerate solution at the origin
+                if (a.second == 0.0 && b.second == 0.0 && c.second == 0.0) {
+                    continue;
+                }
+
+                Eigen::Matrix3f M;
+                M << a.first, b.first, c.first;
+
+                Eigen::Vector3f d;
+                d << a.second, b.second, c.second;
+
+                // Skip matrices with a bad determinant, which can happen
+                // if the two cone normals are nearly identical
+                const auto det = M.determinant();
+                if (fabs(det) < 1e-6) {
+                    continue;
+                }
+                const auto vert = M.inverse() * d;
+                bool duplicate = false;
+                for (const auto& c : corners) {
+                    if (c == vert) {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                if (!duplicate) {
+                    corners.push_back(vert);
+                }
+            }
+        }
+    }
+
+    // Now, we check every epsilon against every possible corner, returning
+    // true when we find a corner that's compatible with each one.
+    for (const auto& c : corners) {
+        bool okay = true;
+        for (const auto& e : es) {
+            if (c.dot(e) <= 0) {
+                okay = false;
+                break;
+            }
+        }
+        if (okay) {
+            return true;
+        }
+    }
+    // Extremely hacky extra loop: there are cases where there exists a valid
+    // point, but it is in between a set of corners.  For example, consider
+    // the three epsilons
+    //     [-1,  0, 0]
+    //     [ 0, -1, 0]
+    //     [-1,  1, 0]
+    //
+    //  These form a Z-extrusion polytope which looks like this:
+    //
+    //   --------O    (O marks the origin)
+    //   |      /
+    //   X    /
+    //   |  /
+    //   |/
+    //  but the corners of this polytope all have one vector for which the
+    //  dot product is exactly zero.  We want to select the point marked with
+    //  an X, but it's not on any corner.
+    for (const auto& c : corners) {
+        for (const auto& d : corners) {
+            const Eigen::Vector3f p = (c + d) / 2.0f;
+            bool okay = true;
+            for (const auto& e : es) {
+                if (p.dot(e) <= 0) {
+                    okay = false;
+                    break;
+                }
+            }
+            if (okay) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool Feature::operator<(const Feature& other) const
+{
+    auto EigenCompare =
+        [](const Eigen::Vector3f& a, const Eigen::Vector3f& b)
+    {
+        for (auto i = 0; i < 3; ++i)
+        {
+            if (a(i) < b(i))
+            {
+                return -1;
+            }
+            else if (a(i) > b(i))
+            {
+                return 1;
+            }
+        }
+        return 0;
+      };
+    size_t i = 0;
+    for (; i < epsilons.size() && i < other.epsilons.size(); ++i)
+    {
+        auto comp = EigenCompare(epsilons[i], other.epsilons[i]);
+        if (comp != 0)
+        {
+            return comp < 0;
+        }
+    }
+    if (i < epsilons.size())
+    {
+        return false;
+    }
+    else if (i < other.epsilons.size())
+    {
+        return true;
+    }
+    else
+    {
+        return EigenCompare(deriv, other.deriv) < 0;
+    }
+}
+
+}   // namespace libfive

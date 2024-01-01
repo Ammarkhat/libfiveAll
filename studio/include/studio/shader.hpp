@@ -20,6 +20,8 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 #include <QOpenGLShaderProgram>
 
+namespace Studio {
+
 namespace Shader
 {
     void initializeGL();
@@ -27,6 +29,6 @@ namespace Shader
     extern QOpenGLShaderProgram* basic;
 
     extern QOpenGLShaderProgram* busy;
-    extern QOpenGLShaderProgram* bars;
     extern QOpenGLShaderProgram* line;
 }
+} // namespace Studio

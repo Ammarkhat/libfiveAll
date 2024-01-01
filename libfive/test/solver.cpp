@@ -1,27 +1,18 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
+
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #include "catch.hpp"
 
 #include "libfive/tree/tree.hpp"
 #include "libfive/solve/solver.hpp"
 
-using namespace Kernel;
+using namespace libfive;
 
 TEST_CASE("Solver::findRoot")
 {
@@ -58,7 +49,7 @@ TEST_CASE("Solver::findRoot")
 
         // Here, we should walk down towards 0, so we'd expect both
         // variables to be scaled by the same size
-        REQUIRE(res == Approx(0));
+        REQUIRE(res == Approx(0).margin(1e-6));
         REQUIRE(vals.size() == 2);
         REQUIRE(vals.at(a.id()) == Approx(0.5145));
         REQUIRE(vals.at(b.id()) == Approx(0.8575));
@@ -111,22 +102,14 @@ TEST_CASE("Solver::findRoot")
 
         auto sos = square(r1) + square(r2) + square(r3) + square(r4) + square(r5);
 
-        std::chrono::time_point<std::chrono::system_clock> start, end;
-        std::chrono::duration<double> elapsed;
-        start = std::chrono::system_clock::now();
-        auto out = Solver::findRoot(sos,
-                {{ax.id(), -3}, {ay.id(), 3},
-                 {bx.id(), 1}, {by.id(), 0},
-                 {cx.id(), 3}, {cy.id(), 2}});
-        end = std::chrono::system_clock::now();
-
-        elapsed = end - start;
-        auto elapsed_ms =
-            std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
-
-        std::string log = "\nSolved SOS root in " +
-               std::to_string(elapsed.count()) + " sec";
-        WARN(log);
+        std::pair<float, Solver::Solution> out;
+        BENCHMARK("SOS root")
+        {
+            out = Solver::findRoot(sos,
+                    {{ax.id(), -3}, {ay.id(), 3},
+                     {bx.id(), 1}, {by.id(), 0},
+                     {cx.id(), 3}, {cy.id(), 2}});
+        };
 
         auto res = out.first;
         auto vals = out.second;

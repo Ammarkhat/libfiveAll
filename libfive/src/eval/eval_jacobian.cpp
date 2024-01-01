@@ -1,179 +1,117 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
+
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #include "libfive/eval/eval_jacobian.hpp"
+#include "libfive/eval/deck.hpp"
+#include "libfive/eval/tape.hpp"
 
-namespace Kernel {
+namespace libfive {
 
-JacobianEvaluator::JacobianEvaluator(std::shared_ptr<Tape> t)
-    : JacobianEvaluator(t, std::map<Tree::Id, float>())
+JacobianEvaluator::JacobianEvaluator(const Tree& root)
+    : JacobianEvaluator(std::make_shared<Deck>(root))
+{
+    // Nothing to do here
+}
+
+JacobianEvaluator::JacobianEvaluator(const Tree& root,
+                                     const std::map<Tree::Id, float>& vars)
+    : JacobianEvaluator(std::make_shared<Deck>(root), vars)
+{
+    // Nothing to do here
+}
+
+JacobianEvaluator::JacobianEvaluator(std::shared_ptr<Deck> d)
+    : JacobianEvaluator(d, std::map<Tree::Id, float>())
 {
     // Nothing to do here
 }
 
 JacobianEvaluator::JacobianEvaluator(
-        std::shared_ptr<Tape> t, const std::map<Tree::Id, float>& vars)
-    : DerivEvaluator(t, vars),
-      j(Eigen::ArrayXXf::Zero(tape->num_clauses + 1, tape->vars.size()))
+        std::shared_ptr<Deck> d, const std::map<Tree::Id, float>& vars)
+    : BaseEvaluator(d, vars), FeatureEvaluator(d, vars),
+      j(deck->vars.size())
 {
-    // Then drop a 1 at each var's position
-    size_t index = 0;
-    for (auto& v : tape->vars.left)
-    {
-        j(v.first, index++) = 1;
-    }
+    // Nothing to do here
 }
 
-std::map<Tree::Id, float> JacobianEvaluator::gradient(const Eigen::Vector3f& p)
+std::map<Tree::Id, float> JacobianEvaluator::gradient(
+        const Eigen::Vector3f& p)
 {
-    // Perform value evaluation, to make sure the f array is correct
-    eval(p);
+    return gradient(p, *deck->tape);
+}
 
-    // Everybody do the tape walk!
-    auto ti = tape->rwalk(*this);
+std::map<Tree::Id, float> JacobianEvaluator::gradient(
+        const Eigen::Vector3f& p, const Tape& tape)
+{
+    // Load the XYZ values into the whole array, rather than
+    // checking and loading a subset of the array.
+    v.row(deck->X) = p.x();
+    v.row(deck->Y) = p.y();
+    v.row(deck->Z) = p.z();
+
+    // Turn on a flag which modifies the DerivArrayEvaluator
+    // behavior for the CONST_VAR opcode.
+    clear_vars = true;
+
+    unsigned count = 0;
+
+    // remap[i] tells us which variable is at ds(i % 3, i / 3)
+    std::array<unsigned, 3 * N> remap;
+
+    auto run = [&]() {
+        if (count) {
+            auto ds = derivs((count + 2) / 3, tape);
+            for (unsigned i=0; i < count; ++i) {
+                j[remap[i]] = ds(i % 3, i / 3);
+            }
+            count = 0;
+        }
+        // Clear the derivative arrays
+        for (long i=0; i < d.rows(); ++i) {
+            d(i) = 0;
+        }
+    };
+
+    // Dummy call to reset the derivative array
+    run();
+
+    // We're going to use the deriv array evaluator
+    // to evaluate the Jacobian instead.
+    unsigned index = 0;
+    for (auto& v : deck->vars.left) {
+        d(v.first)(count % 3, count / 3) = 1.0;
+        remap[count++] = index++;
+        if (count == N * 3) {
+            run();
+        }
+    }
+
+    // Run once more to flush the evaluation and clear the deriv array
+    run();
+
+    // Reload immutable derivatives for X, Y, Z
+    d(deck->X).row(0) = 1;
+    d(deck->Y).row(1) = 1;
+    d(deck->Z).row(2) = 1;
 
     // Unpack from flat array into map
     // (to allow correlating back to VARs in Tree)
     std::map<Tree::Id, float> out;
-    size_t index = 0;
-    for (auto v : tape->vars.left)
+    index = 0;
+    for (auto v : deck->vars.left)
     {
-        out[v.second] = j(ti, index++);
+        out[v.second] = j(index++);
     }
+
+    // Reset our special-behavior-on-CONST_VAR flag to the default.
+    clear_vars = false;
     return out;
 }
 
-void JacobianEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
-                                   Clause::Id a, Clause::Id b)
-{
-#define ov f(id)
-#define oj j.row(id)
-
-#define av f(a)
-#define aj j.row(a)
-
-#define bv f(b)
-#define bj j.row(b)
-
-        switch (op) {
-            case Opcode::ADD:
-                oj = aj + bj;
-                break;
-            case Opcode::MUL:
-                oj = av * bj + bv * aj;
-                break;
-            case Opcode::MIN:
-                oj = (av < bv) ? aj : bj;
-                break;
-            case Opcode::MAX:
-                oj = (av < bv) ? bj : aj;
-                break;
-            case Opcode::SUB:
-                oj = aj - bj;
-                break;
-            case Opcode::DIV:
-                oj = (bv*aj - av*bj) / pow(bv, 2);
-                break;
-            case Opcode::ATAN2:
-                oj = (aj*bv - av*bj) / (pow(av, 2) + pow(bv, 2));
-                break;
-            case Opcode::POW:
-                // The full form of the derivative is
-                // oj = m * (bv * aj + av * log(av) * bj))
-                // However, log(av) is often NaN and bj is always zero,
-                // (since it must be CONST), so we skip that part.
-                oj = pow(av, bv - 1) * (bv * aj);
-                break;
-            case Opcode::NTH_ROOT:
-                oj = pow(av, 1.0f/bv - 1) * (1.0f/bv * aj);
-                break;
-            case Opcode::MOD:
-                // This isn't quite how partial derivatives of mod work,
-                // but close enough normals rendering.
-                oj = aj;
-                break;
-            case Opcode::NANFILL:
-                oj = std::isnan(av) ? bj : aj;
-                break;
-
-            case Opcode::SQUARE:
-                oj = 2 * av * aj;
-                break;
-            case Opcode::SQRT:
-                if (av < 0) oj.setZero();
-                else        oj = (aj / (2 * sqrt(av)));
-                break;
-            case Opcode::NEG:
-                oj = -aj;
-                break;
-            case Opcode::SIN:
-                oj = aj * cos(av);
-                break;
-            case Opcode::COS:
-                oj = aj * -sin(av);
-                break;
-            case Opcode::TAN:
-                oj = aj * pow(1/cos(av), 2);
-                break;
-            case Opcode::ASIN:
-                oj = aj / sqrt(1 - pow(av, 2));
-                break;
-            case Opcode::ACOS:
-                oj = aj / -sqrt(1 - pow(av, 2));
-                break;
-            case Opcode::ATAN:
-                oj = aj / (pow(av, 2) + 1);
-                break;
-            case Opcode::LOG:
-                oj = aj / av;
-                break;
-            case Opcode::EXP:
-                oj = exp(av) * aj;
-                break;
-            case Opcode::ABS:
-                oj = (av > 0 ? 1 : -1) * aj;
-                break;
-            case Opcode::RECIP:
-                oj = -aj / pow(av, 2);
-                break;
-
-            case Opcode::CONST_VAR:
-                oj.setZero();
-                break;
-
-            case Opcode::INVALID:
-            case Opcode::CONST:
-            case Opcode::VAR_X:
-            case Opcode::VAR_Y:
-            case Opcode::VAR_Z:
-            case Opcode::VAR:
-            case Opcode::LAST_OP: assert(false);
-        }
-#undef ov
-#undef oj
-
-#undef av
-#undef aj
-
-#undef bv
-#undef bj
-}
-
-}   // namespace Kernel
-
-
+}   // namespace libfive

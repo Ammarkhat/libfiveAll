@@ -1,26 +1,17 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
+
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #include "libfive/tree/tree.hpp"
 
 #include "shapes.hpp"
 
-using namespace Kernel;
+using namespace libfive;
 
 Tree rectangle(float xmin, float xmax, float ymin, float ymax,
                Eigen::Matrix4f M)
@@ -36,6 +27,13 @@ Tree rotate2d(Tree t, float angle)
     return t.remap( cos(angle) * Tree::X() + sin(angle) * Tree::Y(),
                    -sin(angle) * Tree::X() + cos(angle) * Tree::Y(),
                    Tree::Z());
+}
+
+Tree rotate_x(Tree t, float angle)
+{
+    return t.remap(Tree::X(),
+                   cos(angle) * Tree::Y() + sin(angle) * Tree::Z(),
+                   -sin(angle) * Tree::Y() + cos(angle) * Tree::Z());
 }
 
 Tree move(Tree t, Eigen::Vector3f m)
@@ -97,9 +95,9 @@ Tree menger(int i)
     return max(cube, cutout);
 }
 
-Tree circle(float r)
+Tree circle(float r, Eigen::Vector2f center)
 {
-    return sqrt(square(Tree::X()) + square(Tree::Y())) - r;
+    return sqrt(square(Tree::X() - center.x()) + square(Tree::Y() - center.y())) - r;
 }
 
 Tree sphere(float r, Eigen::Vector3f center)
@@ -118,4 +116,53 @@ Tree box(const Eigen::Vector3f& lower, const Eigen::Vector3f& upper)
                    Tree::Y() - upper.y())),
                max(lower.z() - Tree::Z(),
                    Tree::Z() - upper.z()));
+}
+
+Tree shell(Tree t, float offset)
+{
+    return max(t, t - offset);
+}
+
+Tree blend(Tree a, Tree b, float r)
+{
+    auto vc0 = r - a;
+    auto vc1 = r - b;
+
+    auto u0 = max(vc0, 0.f);
+    auto u1 = max(vc1, 0.f);
+
+    auto len = sqrt(square(u0) + square(u1));
+
+    return max(r, min(a, b)) - len;
+}
+
+Tree cylinder(float r, float h, Eigen::Vector3f base)
+{
+    return extrude(move(circle(r), base), base.z(), base.z() + h);
+}
+
+Tree extrude(Tree a, float lower, float upper)
+{
+    return max(a, max(lower - Tree::Z(), Tree::Z() - upper));
+}
+
+Tree sphereGyroid()
+{
+    auto scale = 0.5f;
+    auto thickness = 0.5;
+
+    auto gyroidSrf =
+        sin(libfive::Tree::X() / scale) * cos(libfive::Tree::Y() / scale) +
+        sin(libfive::Tree::Y() / scale) * cos(libfive::Tree::Z() / scale) +
+        sin(libfive::Tree::Z() / scale) * cos(libfive::Tree::X() / scale);
+
+    auto gyroid = shell(gyroidSrf, thickness);
+    auto sphere1 = sphere(3.0f, { 0.f,0.f,0.f });
+
+    auto sphereGyroid = max(sphere1, gyroid);
+    sphereGyroid = min(sphereGyroid,
+                     min(sphereGyroid,
+                     (sqrt(abs(sphereGyroid)) + sqrt(abs(sphereGyroid))) - .5));
+
+    return sphereGyroid;
 }

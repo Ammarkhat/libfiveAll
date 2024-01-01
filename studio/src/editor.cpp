@@ -20,16 +20,27 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include <set>
 #include <cassert>
 
-#include <QVBoxLayout>
+#include <QLabel>
+#include <QPushButton>
 
 #include "studio/editor.hpp"
-#include "studio/syntax.hpp"
+#include "studio/script.hpp"
 #include "studio/color.hpp"
 
-Editor::Editor(QWidget* parent)
-    : QWidget(parent), script(new Script), script_doc(script->document()),
-      syntax(new Syntax(script_doc)), err(new QPlainTextEdit),
-      err_doc(err->document())
+#ifdef STUDIO_WITH_GUILE
+#include "studio/guile/language.hpp"
+#endif
+
+#ifdef STUDIO_WITH_PYTHON
+#include "studio/python/language.hpp"
+#endif
+
+namespace Studio {
+
+Editor::Editor(Language::Type language)
+    : QWidget(nullptr), script(new Script), script_doc(script->document()),
+      err(new QPlainTextEdit), err_doc(err->document()),
+      layout(new QVBoxLayout)
 {
     error_format.setUnderlineColor(Color::red);
     error_format.setUnderlineStyle(QTextCharFormat::SingleUnderline);
@@ -37,11 +48,10 @@ Editor::Editor(QWidget* parent)
     script->setLineWrapMode(QPlainTextEdit::NoWrap);
     err->setReadOnly(true);
 
-    {   // Use Courier as our default font
-        QFont font;
-        font.setFamily("Courier");
+    {   // Use Inconsolata as our default font
+        QFont font("Inconsolata", 14);
         QFontMetrics fm(font);
-        script->setTabStopWidth(fm.width("  "));
+        script->setTabStopDistance(fm.horizontalAdvance("  "));
         script_doc->setDefaultFont(font);
         err_doc->setDefaultFont(font);
         err->setFixedHeight(fm.height());
@@ -56,12 +66,9 @@ Editor::Editor(QWidget* parent)
 
     setStyleSheet("QPlainTextEdit { " + style);
 
-    // Do parenthesis highlighting when the cursor moves
-    connect(script, &QPlainTextEdit::cursorPositionChanged, syntax,
-            [=](){ syntax->matchParens(script, script->textCursor().position()); });
-
     // Emit the script whenever text changes
-    connect(script, &QPlainTextEdit::textChanged, this, &Editor::onScriptChanged);
+    connect(script, &QPlainTextEdit::textChanged,
+            &m_textChangedDebounce, QOverload<>::of(&QTimer::start));
 
     // Emit modificationChanged to keep window in sync
     connect(script_doc, &QTextDocument::modificationChanged,
@@ -73,15 +80,38 @@ Editor::Editor(QWidget* parent)
     connect(script_doc, &QTextDocument::redoAvailable,
             this, &Editor::redoAvailable);
 
-    auto layout = new QVBoxLayout;
     layout->addWidget(script);
     layout->addWidget(err);
-    layout->setMargin(0);
+    layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(2);
     setLayout(layout);
 
     spinner.setInterval(150);
     connect(&spinner, &QTimer::timeout, this, &Editor::onSpinner);
+
+    m_textChangedDebounce.setInterval(250);
+    m_textChangedDebounce.setSingleShot(true);
+    connect(&m_textChangedDebounce, &QTimer::timeout,
+            this, &Editor::onTextChangedDebounce);
+
+    m_interpreterBusyDebounce.setInterval(100);
+    m_interpreterBusyDebounce.setSingleShot(true);
+    connect(&m_interpreterBusyDebounce, &QTimer::timeout,
+            &spinner, QOverload<>::of(&QTimer::start));
+
+    setLanguage(language == Language::LANGUAGE_NONE
+            ? defaultLanguage()
+            : language);
+    loadDefaultScript();
+}
+
+void Editor::loadDefaultScript() {
+    setScript(m_language->defaultScript());
+    setModified(false);
+}
+
+void Editor::onInterpreterBusy() {
+    m_interpreterBusyDebounce.start();
 }
 
 void Editor::onSpinner()
@@ -92,24 +122,90 @@ void Editor::onSpinner()
     setResult(Color::blue, spin[i]);
 }
 
-void Editor::onResult(QString result)
+void Editor::onInterpreterDone(Result r)
 {
+    m_interpreterBusyDebounce.stop();
     spinner.stop();
-    setResult(Color::green , result);
-    clearError();
-}
 
-void Editor::onError(QString result, QString stack, Range p)
-{
-    spinner.stop();
-    setResult(Color::red, result + "\n\nStack trace:\n" + stack);
-    setError(p);
-}
+    // Remove error selections from the script
+    auto selections = script->extraSelections();
+    selections.erase(
+        std::remove_if(selections.begin(), selections.end(),
+            [=](auto itr) { return itr.format == error_format; }),
+        selections.end());
 
-void Editor::onBusy()
-{
-    spinner.start();
-    onSpinner();
+    if (r.okay) {
+        setResult(Color::green, r.result);
+
+        // Store the textual position of variables, for later editing
+        vars = r.vars;
+
+        emit(shapes(r.shapes));
+    } else {
+        setResult(Color::red, r.error.error);
+
+        // Add new selections for errors in the script doc
+        QTextCursor c(script_doc);
+        c.movePosition(QTextCursor::Down, QTextCursor::MoveAnchor, r.error.range.top());
+        c.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, r.error.range.left());
+        c.movePosition(QTextCursor::Down, QTextCursor::KeepAnchor, r.error.range.height());
+        c.movePosition(QTextCursor::StartOfLine, QTextCursor::KeepAnchor);
+        c.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, r.error.range.right());
+
+        QTextEdit::ExtraSelection s;
+        s.cursor = c;
+        s.format = error_format;
+        selections.append(s);
+    }
+
+    // Set selections, which may include new errors if !r.okay
+    script->setExtraSelections(selections);
+
+    // Clear warnings from the UI
+    for (auto& w : findChildren<QVBoxLayout*>()) {
+        if (w != layout) {
+            for (int i=0; w != layout && i < w->count(); ++i) {
+                auto item = w->itemAt(i)->widget();
+                if (item) {
+                    item->deleteLater();
+                }
+            }
+            layout->removeItem(w);
+            w->deleteLater();
+        }
+    }
+    // Insert new warnings into the UI
+    if (!r.warnings.isEmpty()) {
+        QStringList fixes;
+
+        auto v = new QVBoxLayout();
+        v->setContentsMargins(10, 10, 10, 10);
+        for (auto& f : r.warnings) {
+            v->addWidget(new QLabel(f.first, this));
+            if (!f.second.isEmpty()) {
+                fixes.push_back(f.second);
+            }
+        }
+
+        if (fixes.size()) {
+            auto button = new QPushButton("Fix All", this);
+            connect(button, &QPushButton::pressed, this, [=](){
+                QTextCursor c(script_doc);
+                c.movePosition(QTextCursor::Start);
+                for (auto& f : fixes)
+                {
+                    c.insertText(f);
+                }});
+            v->addWidget(button, 0, Qt::AlignHCenter);
+        }
+        layout->addLayout(v);
+    }
+
+    // Announce the settings
+    if (r.okay) {
+        emit(settingsChanged(r.settings, first_change));
+        first_change = false;
+    }
 }
 
 void Editor::undo()
@@ -124,43 +220,6 @@ void Editor::redo()
 
 ////////////////////////////////////////////////////////////////////////////////
 
-QList<QTextEdit::ExtraSelection> Editor::clearError(bool set)
-{
-    auto selections = script->extraSelections();
-    for (auto itr = selections.begin(); itr != selections.end(); ++itr)
-    {
-        if (itr->format == error_format)
-        {
-            itr = --selections.erase(itr);
-        }
-    }
-
-    if (set)
-    {
-        script->setExtraSelections(selections);
-    }
-    return selections;
-}
-
-void Editor::setError(Range p)
-{
-    auto selections = clearError(false);
-
-    QTextCursor c(script_doc);
-    c.movePosition(QTextCursor::Down, QTextCursor::MoveAnchor, p.start_row);
-    c.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, p.start_col);
-    c.movePosition(QTextCursor::Down, QTextCursor::KeepAnchor, p.end_row - p.start_row);
-    c.movePosition(QTextCursor::StartOfLine, QTextCursor::KeepAnchor);
-    c.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, p.end_col);
-
-    QTextEdit::ExtraSelection s;
-    s.cursor = c;
-    s.format = error_format;
-    selections.append(s);
-
-    script->setExtraSelections(selections);
-}
-
 void Editor::setResult(QColor color, QString result)
 {
     QTextCharFormat fmt;
@@ -172,9 +231,9 @@ void Editor::setResult(QColor color, QString result)
     err->setFixedHeight(std::min(this->height()/3, lines * fm.lineSpacing()));
 }
 
-void Editor::setScript(const QString& s)
+void Editor::setScript(const QString& s, bool reload)
 {
-    first_change = true;
+    first_change = !reload;
     script->setPlainText(s);
 }
 
@@ -189,46 +248,10 @@ void Editor::setModified(bool m)
     script_doc->modificationChanged(m);
 }
 
-void Editor::setKeywords(QString kws)
-{
-    syntax->setKeywords(kws);
-    script_doc->contentsChange(0, 0, script_doc->toPlainText().length());
-}
-
-void Editor::onSettingsChanged(Settings s)
-{
-    const auto render_str = s.toString();
-
-    QTextCursor c(script_doc);
-    c.beginEditBlock();
-    auto match = s.settings_regex.match(script_doc->toPlainText());
-    if (!match.hasMatch())
-    {
-        c.insertText(render_str);
-        c.insertText("\n");
-    }
-    else if (match.captured(0) != render_str)
-    {
-        c.setPosition(match.capturedStart());
-        c.setPosition(match.capturedEnd(), QTextCursor::KeepAnchor);
-        c.removeSelectedText();
-        c.insertText(render_str);
-    }
-    c.endEditBlock();
-}
-
-void Editor::onScriptChanged()
+void Editor::onTextChangedDebounce()
 {
     auto txt = script_doc->toPlainText();
     emit(scriptChanged(txt));
-
-    bool okay = true;
-    const auto s = Settings::fromString(txt, &okay);
-    if (okay)
-    {
-        emit(settingsChanged(s, first_change));
-    }
-    first_change = false;
 }
 
 void Editor::onDragStart()
@@ -243,7 +266,7 @@ void Editor::onDragEnd()
     script->setFocus();
 }
 
-void Editor::setVarValues(QMap<Kernel::Tree::Id, float> vs)
+void Editor::setVarValues(QMap<libfive::Tree::Id, float> vs)
 {
     // Temporarily enable the script so that we can edit the variable value
     script->setEnabled(true);
@@ -272,13 +295,13 @@ void Editor::setVarValues(QMap<Kernel::Tree::Id, float> vs)
     // Build an ordered set so that we can walk through variables
     // in sorted line / column order, making offsets as textual positions
     // shift due to earlier variables in the same line
-    auto comp = [&](Kernel::Tree::Id a, Kernel::Tree::Id b){
+    auto comp = [&](libfive::Tree::Id a, libfive::Tree::Id b){
         auto& pa = vars[a];
         auto& pb = vars[b];
-        return (pa.start_row != pb.start_row) ? (pa.start_row < pb.start_row)
-                                              : (pa.start_col < pb.start_col);
+        return (pa.top() != pb.top()) ? (pa.top() < pb.top())
+                                      : (pa.left() < pb.left());
     };
-    std::set<Kernel::Tree::Id, decltype(comp)> ordered(comp);
+    std::set<libfive::Tree::Id, decltype(comp)> ordered(comp);
     for (auto v=vs.begin(); v != vs.end(); ++v)
     {
         ordered.insert(v.key());
@@ -295,24 +318,23 @@ void Editor::setVarValues(QMap<Kernel::Tree::Id, float> vs)
         // changed already in this line
         auto pos = vars.find(v.key());
         assert(pos != vars.end());
-        if (pos.value().start_row == line)
+        if (pos.value().top() == line)
         {
-            pos.value().start_col += offset;
-            pos.value().end_col += offset;
+            pos.value().translate({offset, 0});
         }
         else
         {
-            line = pos.value().start_row;
+            line = pos.value().top();
             offset = 0;
         }
 
         drag_cursor.movePosition(QTextCursor::Start);
         drag_cursor.movePosition(
-                QTextCursor::Down, QTextCursor::MoveAnchor, pos.value().start_row);
+                QTextCursor::Down, QTextCursor::MoveAnchor, pos.value().top());
         drag_cursor.movePosition(
-                QTextCursor::Right, QTextCursor::MoveAnchor, pos.value().start_col);
+                QTextCursor::Right, QTextCursor::MoveAnchor, pos.value().left());
 
-        const auto length_before = pos.value().end_col - pos.value().start_col;
+        const auto length_before = pos.value().right() - pos.value().left();
         drag_cursor.movePosition(
                 QTextCursor::Right, QTextCursor::KeepAnchor, length_before);
         drag_cursor.removeSelectedText();
@@ -322,7 +344,7 @@ void Editor::setVarValues(QMap<Kernel::Tree::Id, float> vs)
         drag_cursor.insertText(str);
         auto length_after = str.length();
 
-        pos.value().end_col = pos.value().start_col + length_after;
+        pos.value().setRight(pos.value().left() + length_after);
         offset += length_after - length_before;
     }
 
@@ -332,3 +354,103 @@ void Editor::setVarValues(QMap<Kernel::Tree::Id, float> vs)
     drag_cursor.endEditBlock();
     script->setEnabled(false);
 }
+
+void Editor::onSyntaxReady() {
+    script_doc->contentsChange(0, 0, script_doc->toPlainText().length());
+}
+
+Language::Type Editor::defaultLanguage() {
+#if defined(STUDIO_WITH_GUILE)
+    return Language::LANGUAGE_GUILE;
+#elif defined(STUDIO_WITH_PYTHON)
+    return Language::LANGUAGE_PYTHON;
+#else
+#error Must have at least one language defined
+#endif
+}
+
+bool Editor::supportsLanguage(Language::Type t) {
+    switch (t) {
+        case Language::LANGUAGE_NONE:
+            return false;
+        case Language::LANGUAGE_GUILE:
+#ifdef STUDIO_WITH_GUILE
+            return true;
+#else
+            return false;
+#endif
+        case Language::LANGUAGE_PYTHON:
+#ifdef STUDIO_WITH_PYTHON
+            return true;
+#else
+            return false;
+#endif
+    }
+    return false;
+}
+
+void Editor::guessLanguage(QString ext) {
+    if (ext == "py") {
+#ifdef STUDIO_WITH_PYTHON
+        setLanguage(Language::LANGUAGE_PYTHON);
+#endif
+    } else if (ext == "scm" || ext == "io") {
+#ifdef STUDIO_WITH_GUILE
+        setLanguage(Language::LANGUAGE_GUILE);
+#endif
+    }
+}
+
+QString Editor::getExtension() const {
+    return m_language->extension();
+}
+
+Language::Type Editor::getLanguage() const {
+    return m_language->type();
+}
+
+void Editor::setLanguage(Language::Type t) {
+    const auto prev_type = m_language ? m_language->type()
+                                      : Language::LANGUAGE_NONE;
+    bool changed = false;
+
+    switch (t) {
+#ifdef STUDIO_WITH_GUILE
+        case Language::LANGUAGE_GUILE:
+            if (prev_type != Language::LANGUAGE_GUILE) {
+                m_language.reset(Studio::Guile::language(script));
+                changed = true;
+            }
+            break;
+#endif
+#ifdef STUDIO_WITH_PYTHON
+        case Language::LANGUAGE_PYTHON:
+            if (prev_type != Language::LANGUAGE_PYTHON) {
+                m_language.reset(Studio::Python::language(script));
+                changed = true;
+            }
+            break;
+#endif
+        default: return;
+    }
+
+    if (changed) {
+        emit languageChanged();
+
+        connect(script, &QPlainTextEdit::cursorPositionChanged,
+                m_language.data(), [&](){ m_language->onCursorMoved(script); });
+        connect(m_language.data(), &Language::interpreterBusy,
+                &m_interpreterBusyDebounce, QOverload<>::of(&QTimer::start));
+        connect(m_language.data(), &Language::interpreterDone,
+                this, &Editor::onInterpreterDone);
+        connect(m_language.data(), &Language::syntaxReady,
+                this, &Editor::onSyntaxReady);
+
+        connect(this, &Editor::scriptChanged,
+                m_language.data(), &Language::onScriptChanged);
+        connect(this, &Editor::onShowDocs,
+                m_language.data(), &Language::onShowDocs);
+    }
+}
+
+}   // namespace Studio

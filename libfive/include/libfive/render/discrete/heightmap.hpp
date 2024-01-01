@@ -2,30 +2,19 @@
 libfive: a CAD kernel for modeling with implicit functions
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #pragma once
 
 #include <atomic>
 
+#include "libfive/eval/evaluator.hpp"
 #include "libfive/render/discrete/voxels.hpp"
 #include "libfive/tree/tree.hpp"
 
-#include "libfive/render/discrete/eval_height.hpp"
-
-namespace Kernel {
+namespace libfive {
 
 class Heightmap
 {
@@ -38,20 +27,25 @@ public:
      *  into int32_t pixels.
      */
     static std::unique_ptr<Heightmap> render(
-            const Tree t, Voxels r,
+            const Tree& t, Voxels r,
             const std::atomic_bool& abort, size_t threads=8);
 
     /*
      *  Render an image using pre-allocated evaluators
      */
     static std::unique_ptr<Heightmap> render(
-            const std::vector<HeightmapEvaluator*>& es, Voxels r,
+            const std::vector<Evaluator*>& es, Voxels r,
             const std::atomic_bool& abort);
 
     /*
      *  Saves the depth component as a 16-bit single-channel PNG
      */
     bool savePNG(std::string filename);
+
+    /*
+     *  Saves the normals as a 8-bit RGBA PNG
+     */
+    bool saveNormalPNG(std::string filename);
 
     typedef Eigen::Array<float, Eigen::Dynamic, Eigen::Dynamic> Depth;
     typedef Eigen::Array<uint32_t, Eigen::Dynamic, Eigen::Dynamic> Normal;
@@ -64,18 +58,20 @@ protected:
      *  Recurses down into a rendering operation
      *  Returns true if aborted, false otherwise
      */
-    bool recurse(HeightmapEvaluator* e, const Voxels::View& r,
-                 const std::atomic_bool& abort);
+    bool recurse(Evaluator* e, const std::shared_ptr<Tape>& tape,
+                 const Voxels::View& r, const std::atomic_bool& abort);
 
     /*
      *  Evaluates a set of voxels on a pixel-by-pixel basis
      */
-    void pixels(HeightmapEvaluator* e, const Voxels::View& v);
+    void pixels(Evaluator* e, const std::shared_ptr<Tape>& tape,
+                const Voxels::View& v);
 
     /*
      *  Fills a region of voxels, marking them as at the top of the view
      */
-    void fill(HeightmapEvaluator* e, const Voxels::View& v);
+    void fill(Evaluator* e, const std::shared_ptr<Tape>& tape,
+              const Voxels::View& v);
 
 };
-}   // namespace Kernel
+}   // namespace libfive

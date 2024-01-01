@@ -1,50 +1,41 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
+
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #include "catch.hpp"
 
 #include "libfive/eval/feature.hpp"
 
-using namespace Kernel;
+using namespace libfive;
 
 TEST_CASE("Feature::push")
 {
     SECTION("Pushing zero-length epsilon")
     {
-        Feature f;
+        Feature f(Eigen::Vector3f::Zero());
         REQUIRE(f.push({0, 0, 0}) == false);
     }
     SECTION("Separated by exactly 180 degrees")
     {
-        Feature f;
+        Feature f(Eigen::Vector3f::Zero());
         REQUIRE(f.push({1, 0, 0}) == true);
         REQUIRE(f.push({-1, 0, 0}) == false);
     }
     SECTION("Separability testing")
     {
-        Feature a;
+        Feature a(Eigen::Vector3f::Zero());
         REQUIRE(a.push({1, 0, 0}) == true);
         REQUIRE(a.push({0, 1, 0}) == true);
         REQUIRE(a.push({0, 0, 1}) == true);
         REQUIRE(a.push({1, 1, 1}) == true);
         REQUIRE(a.push({-1, -1, -1}) == false);
 
-        Feature b;
+        Feature b(Eigen::Vector3f::Zero());
         REQUIRE(b.push({1, 0, 0}) == true);
         REQUIRE(b.push({0, -1, 0}) == true);
         REQUIRE(b.push({0, 0, -1}) == true);
@@ -56,25 +47,49 @@ TEST_CASE("Feature::push")
 
     SECTION("Fun with numerical instability")
     {
-        Feature a;
-        auto s = sqrt(2);
+        Feature a(Eigen::Vector3f::Zero());
+        const float s = sqrt(2.f);
         REQUIRE(a.push({s,  0, -s}) == true);
         REQUIRE(a.push({s,  0,  s}) == true);
         REQUIRE(a.push({1, 0, -1}) == true);
     }
+
+    SECTION("2D around the clock")
+    {
+        Feature a(Eigen::Vector3f::Zero());
+        REQUIRE(a.push({-1,  0, 0}));
+        REQUIRE(a.push({ 0, -1, 0}));
+        REQUIRE(a.push({-1,  1, 0}));
+    }
 }
 
-TEST_CASE("Feature::isCompatible")
+TEST_CASE("Feature::check")
 {
     SECTION("Flat plane")
     {
-        Feature a;
+        Feature a(Eigen::Vector3f::Zero());
         REQUIRE(a.push({-1, 1, 0}) == true);
         REQUIRE(a.push({-1, -1, 0}) == true);
-        REQUIRE(a.isCompatible({0, -1, 0}));
-        REQUIRE(a.isCompatible({0, 1, 0}));
+        REQUIRE(a.check({0, -1, 0}));
+        REQUIRE(a.check({0, 1, 0}));
 
         REQUIRE(a.push({0, 1, 0}));
-        REQUIRE(!a.isCompatible({0, -1, 0}));
+        REQUIRE(!a.check({0, -1, 0}));
+    }
+}
+
+TEST_CASE("Feature::check(Feature)")
+{
+    SECTION("Tetrahedron")
+    {
+        Feature a(Eigen::Vector3f::Zero());
+        REQUIRE(a.push({0, 0,  1}) == true);
+        REQUIRE(a.push({1, 0, -1}) == true);
+
+        Feature b(Eigen::Vector3f::Zero());
+        REQUIRE(b.push({-1,  1, -1}) == true);
+        REQUIRE(b.push({-1, -1, -1}) == true);
+
+        REQUIRE(!a.check(b));
     }
 }

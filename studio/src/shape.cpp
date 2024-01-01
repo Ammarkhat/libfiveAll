@@ -19,22 +19,27 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "studio/shape.hpp"
 #include "studio/shader.hpp"
 
-#include "libfive/solve/bounds.hpp"
+#include "libfive/eval/tape.hpp"
+#include "libfive/eval/evaluator.hpp"
+
+namespace Studio {
 
 const int Shape::MESH_DIV_EMPTY;
 const int Shape::MESH_DIV_ABORT;
 const int Shape::MESH_DIV_NEW_VARS;
 const int Shape::MESH_DIV_NEW_VARS_SMALL;
 
-Shape::Shape(Kernel::Tree t, std::map<Kernel::Tree::Id, float> vars)
-    : tree(t), vars(vars), vert_vbo(QOpenGLBuffer::VertexBuffer),
+Shape::Shape(const libfive::Tree& t,
+             std::map<libfive::Tree::Id, float> vars)
+    : tree(t.optimized()), vars(vars),
+      vert_vbo(QOpenGLBuffer::VertexBuffer),
       tri_vbo(QOpenGLBuffer::IndexBuffer)
 {
     // Construct evaluators to run meshing (in parallel)
     es.reserve(8);
     for (unsigned i=0; i < es.capacity(); ++i)
     {
-        es.emplace_back(Kernel::XTreeEvaluator(t, vars));
+        es.emplace_back(libfive::Evaluator(tree, vars));
     }
 
     connect(this, &Shape::gotMesh, this, &Shape::redraw);
@@ -56,7 +61,7 @@ bool Shape::updateFrom(const Shape* other)
     return updateVars(other->vars);
 }
 
-bool Shape::updateVars(const std::map<Kernel::Tree::Id, float>& vs)
+bool Shape::updateVars(const std::map<libfive::Tree::Id, float>& vs)
 {
     bool changed = false;
 
@@ -86,12 +91,12 @@ bool Shape::updateVars(const std::map<Kernel::Tree::Id, float>& vs)
         // Only abort non-default renders
         if (target_div != default_div)
         {
-            cancel.store(true);
+            mesh_settings.cancel.store(true);
         }
 
         // Start a special render operation that uses a flag in the div
         // field that tells the system load new var values before starting
-        startRender({next.first, div});
+        startRender({next.settings, div, next.alg});
     }
 
     return changed;
@@ -103,7 +108,7 @@ void Shape::draw(const QMatrix4x4& M)
     {
         initializeOpenGLFunctions();
 
-        mesh_bounds = Kernel::Region<3>({0,0,0}, {0,0,0});
+        mesh_bounds = libfive::Region<3>({0,0,0}, {0,0,0});
         GLfloat* verts = new GLfloat[mesh->verts.size() * 6];
         unsigned i = 0;
 
@@ -208,52 +213,56 @@ void Shape::drawMonochrome(const QMatrix4x4& M, QColor color)
     }
 }
 
-void Shape::startRender(Settings s)
+void Shape::startRender(Settings s, libfive::BRepAlgorithm alg)
 {
-    startRender(QPair<Settings, int>(s, s.defaultDiv()));
+    startRender(RenderSettings { s, s.defaultDiv(), alg });
 }
 
-void Shape::startRender(QPair<Settings, int> s)
+void Shape::startRender(RenderSettings s)
 {
     if (default_div == MESH_DIV_EMPTY)
     {
-        default_div = s.second;
+        default_div = s.div;
     }
 
     if (running)
     {
-        if (next.second != MESH_DIV_ABORT)
+        if (next.div != MESH_DIV_ABORT)
         {
-            cancel.store(true);
+            mesh_settings.cancel.store(true);
             next = s;
         }
     }
     else
     {
-        if (s.second == MESH_DIV_NEW_VARS ||
-            s.second == MESH_DIV_NEW_VARS_SMALL)
+        if (s.div == MESH_DIV_NEW_VARS ||
+            s.div == MESH_DIV_NEW_VARS_SMALL)
         {
             for (auto& e : es)
             {
                 e.updateVars(vars);
             }
-            s.second = (s.second == MESH_DIV_NEW_VARS) ? default_div : 0;
+            s.div = (s.div == MESH_DIV_NEW_VARS) ? default_div : 0;
         }
 
-        target_div = s.second;
+        target_div = s.div;
 
         timer.start();
         running = true;
+#if QT_VERSION >= 0x060000
+        mesh_future = QtConcurrent::run(&Shape::renderMesh, this, s);
+#else
         mesh_future = QtConcurrent::run(this, &Shape::renderMesh, s);
+#endif
         mesh_watcher.setFuture(mesh_future);
 
-        next = {s.first, s.second - 1};
+        next = {s.settings, s.div - 1, s.alg};
     }
 }
 
 bool Shape::done() const
 {
-    return next.second == MESH_DIV_EMPTY && mesh_future.isFinished();
+    return next.div == MESH_DIV_EMPTY && mesh_future.isFinished();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -280,20 +289,20 @@ void Shape::setHover(bool h)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-Kernel::JacobianEvaluator* Shape::dragFrom(const QVector3D& v)
+std::pair<libfive::JacobianEvaluator*, libfive::Tape::Handle>
+Shape::dragFrom(const QVector3D& v)
 {
-    auto e = new Kernel::JacobianEvaluator(
-            std::make_shared<Kernel::Tape>(tree), vars);
-    e->evalAndPush({v.x(), v.y(), v.z()});
-    return e;
+    auto e = new libfive::JacobianEvaluator(tree, vars);
+    auto o = e->valueAndPush({v.x(), v.y(), v.z()});
+    return std::make_pair(e, o.second);
 }
 
 void Shape::deleteLater()
 {
     if (running)
     {
-        next.second = MESH_DIV_ABORT;
-        cancel.store(true);
+        next.div = MESH_DIV_ABORT;
+        mesh_settings.cancel.store(true);
     }
     else
     {
@@ -329,12 +338,12 @@ void Shape::onFutureFinished()
         }
     }
 
-    if (next.second == MESH_DIV_ABORT)
+    if (next.div == MESH_DIV_ABORT)
     {
         QObject::deleteLater();
     }
-    else if (next.second >= 0 || next.second == MESH_DIV_NEW_VARS
-                              || next.second == MESH_DIV_NEW_VARS_SMALL)
+    else if (next.div >= 0 || next.div == MESH_DIV_NEW_VARS
+                           || next.div == MESH_DIV_NEW_VARS_SMALL)
     {
         startRender(next);
     }
@@ -352,34 +361,28 @@ void Shape::freeGL()
     }
 }
 
+libfive::Tree::Id Shape::getUniqueId(
+    std::unordered_map<libfive::TreeDataKey, libfive::Tree>& canonical)
+{
+    return tree.cooptimize(canonical).id();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // This function is called in a separate thread:
-Shape::BoundedMesh Shape::renderMesh(QPair<Settings, int> s)
+Shape::BoundedMesh Shape::renderMesh(RenderSettings s)
 {
-    cancel.store(false);
+    // Use the global bounds settings
+    libfive::Region<3> r(
+            {s.settings.min.x(), s.settings.min.y(), s.settings.min.z()},
+            {s.settings.max.x(), s.settings.max.y(), s.settings.max.z()});
 
-    // Use the global bounds settings by default, but try to solve for more
-    // precise bounds if autobounds is true.
-    Kernel::Region<3> r({s.first.min.x(), s.first.min.y(), s.first.min.z()},
-                        {s.first.max.x(), s.first.max.y(), s.first.max.z()});
-    if (s.first.autobounds)
-    {
-        auto r_ = Kernel::findBounds(&es[0].interval);
-        if (!r_.lower.isNaN().any() &&
-            !r_.upper.isNaN().any() &&
-            ((r_.upper - r_.lower).array() / (r.upper - r.lower).array())
-                .abs().maxCoeff() < 1000)
-        {
-            r = r_;
+    mesh_settings.reset();
+    mesh_settings.min_feature = 1 / (s.settings.res / (1 << s.div));
+    mesh_settings.max_err = pow(10, -s.settings.quality);
+    mesh_settings.alg = s.alg;
 
-            // Add a little padding for numerical safety
-            Kernel::Region<3>::Pt diff = r.upper - r.lower;
-            r.lower -= diff / 10;
-            r.upper += diff / 10;
-        }
-    }
-    auto m = Kernel::Mesh::render(es.data(), r,
-            1 / (s.first.res / (1 << s.second)),
-            pow(10, -s.first.quality), cancel);
+    auto m = libfive::Mesh::render(es.data(), r, mesh_settings);
     return {m.release(), r};
 }
+
+}   // namespace Studio

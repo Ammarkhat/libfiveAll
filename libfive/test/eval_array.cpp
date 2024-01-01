@@ -1,20 +1,11 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
+
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #include <Eigen/Geometry>
 
@@ -23,71 +14,170 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #include "libfive/tree/tree.hpp"
 #include "libfive/eval/eval_array.hpp"
 
-using namespace Kernel;
+using namespace libfive;
 
 TEST_CASE("ArrayEvaluator::eval")
 {
     SECTION("X")
     {
-        auto t = std::make_shared<Tape>(Tree::X());
-        ArrayEvaluator e(t);
-        REQUIRE(e.eval({1.0, 2.0, 3.0}) == 1.0);
+        ArrayEvaluator e(Tree::X());
+        REQUIRE(e.value({1.0, 2.0, 3.0}) == 1.0);
     }
 
     SECTION("Y")
     {
-        auto t = std::make_shared<Tape>(Tree::Y());
-        ArrayEvaluator e(t);
-        REQUIRE(e.eval({1.0, 2.0, 3.0}) == 2.0);
+        ArrayEvaluator e(Tree::Y());
+        REQUIRE(e.value({1.0, 2.0, 3.0}) == 2.0);
     }
 
     SECTION("Constant")
     {
-        auto t = std::make_shared<Tape>(Tree(3.14));
-        ArrayEvaluator e(t);
-        REQUIRE(e.eval({1.0, 2.0, 3.0}) == Approx(3.14));
+        ArrayEvaluator e(Tree(3.14));
+        REQUIRE(e.value({1.0, 2.0, 3.0}) == Approx(3.14));
+    }
+
+    SECTION("Math")
+    {
+        auto X = Tree::X();
+        auto Y = Tree::Y();
+        ArrayEvaluator e(X*2 + Y*3);
+        REQUIRE(e.value({1.0, 2.0, 3.0}) == Approx(8));
     }
 
     SECTION("Secondary variable")
     {
         auto v = Tree::var();
-        auto t = std::make_shared<Tape>(v);
-        ArrayEvaluator e(t, {{v.id(), 3.14}});
-        REQUIRE(e.eval({1.0, 2.0, 3.0}) == Approx(3.14));
+        ArrayEvaluator e(v, {{v.id(), 3.14}});
+        REQUIRE(e.value({1.0, 2.0, 3.0}) == Approx(3.14));
+    }
+
+    SECTION("Constant + variable")
+    {
+        auto v = Tree::var();
+        ArrayEvaluator e(v + 1.0, {{v.id(), 3.14}});
+        REQUIRE(e.value({1.0, 2.0, 3.0}) == Approx(4.14));
+    }
+
+    SECTION("Multiple variables")
+    {
+        // Deliberately construct out of order
+        auto a = Tree::var();
+        auto c = Tree::var();
+        auto b = Tree::var();
+
+        ArrayEvaluator e(a*1 + b*2 + c*3,
+                {{a.id(), 3}, {c.id(), 7}, {b.id(), 5}});
+
+        REQUIRE(e.value({0, 0, 0}) == Approx(34));
     }
 
     SECTION("X + 1")
     {
-        auto t = std::make_shared<Tape>(Tree::X() + 1);
-        ArrayEvaluator e(t);
-        REQUIRE(e.eval({1.0, 2.0, 3.0}) == 2.0);
+        ArrayEvaluator e(Tree::X() + 1);
+        REQUIRE(e.value({1.0, 2.0, 3.0}) == 2.0);
     }
 
     SECTION("X + Z")
     {
-        auto t = std::make_shared<Tape>(Tree::X() + Tree::Z());
-        ArrayEvaluator e(t);
-        REQUIRE(e.eval({1.0, 2.0, 3.0}) == 4.0);
+        ArrayEvaluator e(Tree::X() + Tree::Z());
+        REQUIRE(e.value({1.0, 2.0, 3.0}) == 4.0);
     }
 
     SECTION("nth-root")
     {
-        auto t = std::make_shared<Tape>(nth_root(Tree::X(), 3));
-        ArrayEvaluator e(t);
-        REQUIRE(e.eval({-0.5, 0.0, 0.0}) == Approx(-0.7937));
+        ArrayEvaluator e(nth_root(Tree::X(), 3));
+        REQUIRE(e.value({-0.5, 0.0, 0.0}) == Approx(-0.7937));
     }
 
     SECTION("Every operation")
     {
-        for (unsigned i=7; i < Kernel::Opcode::LAST_OP; ++i)
+        for (unsigned i=7; i < libfive::Opcode::ORACLE; ++i)
         {
-            auto op = (Kernel::Opcode::Opcode)i;
-            Tree t = (Opcode::args(op) == 2 ? Tree(op, Tree::X(), Tree(5))
-                                            : Tree(op, Tree::X()));
-            auto p = std::make_shared<Tape>(t);
-            ArrayEvaluator e(p);
-            e.eval({0, 0, 0});
+            auto op = (libfive::Opcode::Opcode)i;
+            Tree t = (Opcode::args(op) == 2
+                    ? Tree::binary(op, Tree::X(), 5)
+                    : Tree::unary(op, Tree::X()));
+            ArrayEvaluator e(t);
+            e.value({0, 0, 0});
             REQUIRE(true /* No crash! */ );
+        }
+    }
+
+    SECTION("Behavior of mod operator")
+    {
+        ArrayEvaluator e(mod(Tree::X(), Tree::Y()));
+        REQUIRE(e.value({1.1, 1.0, 0.0}) == Approx(0.1));
+        REQUIRE(e.value({-1.1, 1.0, 0.0}) == Approx(0.9));
+        REQUIRE(e.value({-1.1, 1.1, 0.0}) == Approx(0.0));
+
+        REQUIRE(e.value({2.1, 2.5, 0.0}) == Approx(2.1));
+        REQUIRE(e.value({2.6, 2.5, 0.0}) == Approx(0.1));
+
+        REQUIRE(e.value({2.1, -2, 0.0}) == Approx(-1.9));
+        REQUIRE(e.value({2.4, -1, 0.0}) == Approx(-0.6));
+
+        REQUIRE(e.value({-2.1, -2, 0.0}) == Approx(-0.1));
+        REQUIRE(e.value({-2.4, -1, 0.0}) == Approx(-0.4));
+    }
+
+    SECTION("SIMD consistency")
+    {
+        std::vector<float> pts = {0.0f, -1.0f, 1.0f, 1.000001f,
+                                 -3.14159f, 19.0f, 2.718f,
+                                  123123123123123123.0f};
+
+        const auto count = 100;
+        for (unsigned i=7; i < libfive::Opcode::ORACLE; ++i)
+        {
+            auto op = (libfive::Opcode::Opcode)i;
+            CAPTURE(Opcode::toString(op));
+            if (Opcode::args(op) == 1) {
+                Tree t = Tree::unary(op, Tree::X());
+                ArrayEvaluator e(t);
+                for (auto p : pts) {
+                    CAPTURE(p);
+                    for (unsigned i=0; i < count; ++i) {
+                        e.set({p, 0, 0}, i);
+                    }
+                    auto vs = e.values(count);
+                    for (unsigned i=0; i < count; ++i) {
+                        CAPTURE(i);
+                        if (std::isnan(vs[i])) {
+                            REQUIRE(std::isnan(vs[0]));
+                        } else {
+                            REQUIRE(vs[i] == vs[0]);
+                        }
+                    }
+                }
+            } else if (Opcode::args(op) == 2) {
+                if (op == Opcode::OP_POW || op == Opcode::OP_NTH_ROOT) {
+                    continue;
+                }
+                Tree t = Tree::binary(op, Tree::X(), Tree::Y());
+                ArrayEvaluator e(t);
+
+                for (auto p : pts) {
+                    CAPTURE(p);
+                    for (auto q : pts) {
+                        // Special-casing for invalid operation
+                        if (op == Opcode::OP_MOD && q <= 0) { continue; }
+
+                        CAPTURE(q);
+                        for (unsigned i=0; i < count; ++i) {
+                            e.set({p, q, 0}, i);
+                        }
+                        auto vs = e.values(count);
+                        for (unsigned i=0; i < count; ++i) {
+                            CAPTURE(i);
+                            if (std::isnan(vs[i])) {
+                                REQUIRE(std::isnan(vs[0]));
+                            } else {
+                                REQUIRE(vs[i] == vs[0]);
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -99,41 +189,20 @@ TEST_CASE("ArrayEvaluator::setVar")
     auto c = Tree::var();
     auto b = Tree::var();
 
-    auto t = std::make_shared<Tape>(a*1 + b*2 + c*3);
-    ArrayEvaluator e(t, {{a.id(), 3}, {c.id(), 7}, {b.id(), 5}});
-    REQUIRE(e.eval({0, 0, 0}) == Approx(34));
+    ArrayEvaluator e(a*1 + b*2 + c*3, {{a.id(), 3}, {c.id(), 7}, {b.id(), 5}});
+    REQUIRE(e.value({0, 0, 0}) == Approx(34));
 
     e.setVar(a.id(), 5);
-    REQUIRE(e.eval({0, 0, 0}) == Approx(36));
+    REQUIRE(e.value({0, 0, 0}) == Approx(36));
     e.setVar(b.id(), 0);
-    REQUIRE(e.eval({0, 0, 0}) == Approx(26));
+    REQUIRE(e.value({0, 0, 0}) == Approx(26));
     e.setVar(c.id(), 10);
-    REQUIRE(e.eval({0, 0, 0}) == Approx(35));
-}
-
-TEST_CASE("ArrayEvaluator::evalAndPush")
-{
-    auto t = std::make_shared<Tape>(min(Tree::X(), Tree::Y()));
-    ArrayEvaluator e(t);
-
-    e.evalAndPush({-1, 0, 0}); // specialize to just "X"
-    REQUIRE(e.eval({-2, 0, 0}) == -2);
-    REQUIRE(e.eval({4, 0, 0}) == 4);
-    REQUIRE(e.eval({4, 5, 0}) == 4);
-    REQUIRE(e.eval({10, 5, 0}) == 10);
-
-    e.pop();
-    e.evalAndPush({0, -1, 0}); // specialize to just "Y"
-    REQUIRE(e.eval({-2, 0, 0}) == 0);
-    REQUIRE(e.eval({4, 0, 0}) == 0);
-    REQUIRE(e.eval({4, 5, 0}) == 5);
-    REQUIRE(e.eval({10, 5, 0}) == 5);
+    REQUIRE(e.value({0, 0, 0}) == Approx(35));
 }
 
 TEST_CASE("ArrayEvaluator::getAmbiguous")
 {
-    auto t = std::make_shared<Tape>(min(Tree::X(), -Tree::X()));
-    ArrayEvaluator e(t);
+    ArrayEvaluator e(min(Tree::X(), -Tree::X()));
     e.set({0, 0, 0}, 0);
     e.set({1, 0, 0}, 1);
     e.set({2, 0, 0}, 2);
@@ -149,4 +218,36 @@ TEST_CASE("ArrayEvaluator::getAmbiguous")
     REQUIRE(b.count() == 2);
     REQUIRE(b(0) == true);
     REQUIRE(b(3) == true);
+}
+
+TEST_CASE("ArrayEvaluator::values (returned size)")
+{
+    ArrayEvaluator e(min(Tree::X(), -Tree::X()));
+    e.set({0, 0, 0}, 0);
+    e.set({1, 0, 0}, 1);
+    e.set({2, 0, 0}, 2);
+
+    auto o = e.values(3);
+    REQUIRE(o.cols() == 3);
+}
+
+TEST_CASE("ArrayEvaluator::valueAndPush")
+{
+    ArrayEvaluator e(min(Tree::X(), Tree::Y()));
+
+    {
+        auto h = e.valueAndPush({-1, 0, 0}); // specialize to just "X"
+        REQUIRE(e.value({-2, 0, 0}, *h.second) == -2);
+        REQUIRE(e.value({4, 0, 0}, *h.second) == 4);
+        REQUIRE(e.value({4, 5, 0}, *h.second) == 4);
+        REQUIRE(e.value({10, 5, 0}, *h.second) == 10);
+    }
+
+    {
+        auto h = e.valueAndPush({0, -1, 0}); // specialize to just "Y"
+        REQUIRE(e.value({-2, 0, 0}, *h.second) == 0);
+        REQUIRE(e.value({4, 0, 0}, *h.second) == 0);
+        REQUIRE(e.value({4, 5, 0}, *h.second) == 5);
+        REQUIRE(e.value({10, 5, 0}, *h.second) == 5);
+    }
 }
