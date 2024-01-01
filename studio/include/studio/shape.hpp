@@ -24,21 +24,29 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include <QOpenGLBuffer>
 #include <QOpenGLFunctions>
 
+#include "libfive/eval/evaluator.hpp"
 #include "libfive/tree/tree.hpp"
+
 #include "libfive/render/brep/mesh.hpp"
-#include "libfive/eval/eval_jacobian.hpp"
+#include "libfive/render/brep/region.hpp"
+#include "libfive/render/brep/settings.hpp"
 
 #include "studio/settings.hpp"
+
+namespace libfive { class Tape; /*  forward declaration */ }
+
+namespace Studio {
 
 class Shape : public QObject, QOpenGLFunctions
 {
     Q_OBJECT
 public:
-    Shape(Kernel::Tree t, std::map<Kernel::Tree::Id, float> vars);
+    Shape(const libfive::Tree& t,
+          std::map<libfive::Tree::Id, float> vars);
 
     /*
      *  In destructor, wait for computation to finish
-     *  (otherwise XTreeEvaluators may be destroyed early)
+     *  (otherwise Evaluators may be destroyed early)
      */
     ~Shape();
 
@@ -54,7 +62,7 @@ public:
     /*
      *  Kicks off a mesh rendering operation in a separate thread
      */
-    void startRender(Settings s);
+    void startRender(Settings s, libfive::BRepAlgorithm alg);
 
     /*
      *  Checks whether the shape is done rendering
@@ -64,12 +72,12 @@ public:
     /*
      *  Returns the raw mesh object pointer
      */
-    const Kernel::Mesh* getMesh() const { return mesh.data(); }
+    const libfive::Mesh* getMesh() const { return mesh.data(); }
 
     /*
      *  Looks up the tree's ID
      */
-    Kernel::Tree::Id id() const { return tree.id(); }
+    libfive::Tree::Id id() const { return tree.id(); }
 
     /*
      *  Updates variables from another Shape
@@ -85,7 +93,7 @@ public:
      *
      *  Returns true if variable values have changed.
      */
-    bool updateVars(const std::map<Kernel::Tree::Id, float>& vs);
+    bool updateVars(const std::map<libfive::Tree::Id, float>& vs);
 
     /*
      *  Checks to see whether this shape has attached vars
@@ -99,18 +107,19 @@ public:
      *  Ownership is transfered, so the caller is responsible for deleting
      *  the evaluator (or storing it in an owned structure)
      */
-    Kernel::JacobianEvaluator* dragFrom(const QVector3D& pt);
+    std::pair<libfive::JacobianEvaluator*, std::shared_ptr<libfive::Tape>>
+    dragFrom(const QVector3D& pt);
 
     /*
      *  Returns another pointer to the solution map
      */
-    const std::map<Kernel::Tree::Id, float>& getVars() const
+    const std::map<libfive::Tree::Id, float>& getVars() const
     { return vars; }
 
     /*
      *  Looks up the shape's bounds
      */
-    const Kernel::Region<3>& getRenderBounds() const { return render_bounds; }
+    const libfive::Region<3>& getRenderBounds() const { return render_bounds; }
 
     /*
      *  Sets grabbed and redraws as necessary
@@ -131,6 +140,12 @@ public:
      */
     void freeGL();
 
+    /*
+     *  Returns a unique ID using the given deduplication map
+     */
+    libfive::Tree::Id getUniqueId(
+        std::unordered_map<libfive::TreeDataKey, libfive::Tree>& canonical);
+
 signals:
     void gotMesh();
     void redraw();
@@ -142,26 +157,32 @@ protected slots:
     void onFutureFinished();
 
 protected:
-    void startRender(QPair<Settings, int> s);
+    struct RenderSettings {
+        Settings settings;
+        int div;
+        libfive::BRepAlgorithm alg;
+    };
+    typedef QPair<libfive::Mesh*,libfive::Region<3>> BoundedMesh;
+
+    void startRender(RenderSettings s);
+    BoundedMesh renderMesh(RenderSettings s);
 
     bool grabbed=false;
     bool hover=false;
 
-    typedef QPair<Kernel::Mesh*, Kernel::Region<3>> BoundedMesh;
-    BoundedMesh renderMesh(QPair<Settings, int> s);
     QFuture<BoundedMesh> mesh_future;
     QFutureWatcher<BoundedMesh> mesh_watcher;
-    std::atomic_bool cancel;
+    libfive::BRepSettings mesh_settings;
 
-    Kernel::Tree tree;
-    std::map<Kernel::Tree::Id, float> vars;
-    std::vector<Kernel::XTreeEvaluator,
-                Eigen::aligned_allocator<Kernel::XTreeEvaluator>> es;
+    libfive::Tree tree;
+    std::map<libfive::Tree::Id, float> vars;
+    std::vector<libfive::Evaluator,
+                Eigen::aligned_allocator<libfive::Evaluator>> es;
 
-    QScopedPointer<Kernel::Mesh> mesh;
-    Kernel::Region<3> render_bounds;
-    Kernel::Region<3> mesh_bounds;
-    QPair<Settings, int> next;
+    QScopedPointer<libfive::Mesh> mesh;
+    libfive::Region<3> render_bounds;
+    libfive::Region<3> mesh_bounds;
+    RenderSettings next;
 
     /*  running marks not just whether the future has finished, but whether
      *  the main thread has handled it.  This prevents situations where the
@@ -174,7 +195,7 @@ protected:
     QOpenGLBuffer vert_vbo;
     QOpenGLBuffer tri_vbo;
 
-    QTime timer;
+    QElapsedTimer timer;
 
     const static int MESH_DIV_EMPTY=-1;
     const static int MESH_DIV_ABORT=-2;
@@ -184,3 +205,5 @@ protected:
     int default_div=MESH_DIV_EMPTY;
     int target_div=MESH_DIV_EMPTY;
 };
+
+} // namespace Studio

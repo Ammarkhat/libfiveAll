@@ -1,20 +1,11 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
+
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #include <Eigen/Geometry>
 
@@ -22,17 +13,18 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "libfive/tree/tree.hpp"
 #include "libfive/eval/eval_interval.hpp"
-#include "libfive/eval/eval_array.hpp"
+#include "libfive/eval/evaluator.hpp"
+#include "libfive/eval/deck.hpp"
+#include "libfive/eval/tape.hpp"
 #include "libfive/render/brep/region.hpp"
 
-using namespace Kernel;
+using namespace libfive;
 
 TEST_CASE("IntervalEvaluator::eval")
 {
     SECTION("Basic math")
     {
-        auto t = std::make_shared<Tape>(Tree::X() + 1);
-        IntervalEvaluator e(t);
+        IntervalEvaluator e(Tree::X() + 1);
 
         auto out = e.eval({1,1,1}, {2,2,2});
 
@@ -42,13 +34,12 @@ TEST_CASE("IntervalEvaluator::eval")
 
     SECTION("Every operation")
     {
-        for (unsigned i=7; i < Kernel::Opcode::LAST_OP; ++i)
+        for (unsigned i=7; i < libfive::Opcode::ORACLE; ++i)
         {
-            auto op = (Kernel::Opcode::Opcode)i;
-            Tree t = (Opcode::args(op) == 2 ? Tree(op, Tree::X(), Tree(5))
-                                            : Tree(op, Tree::X()));
-            auto p = std::make_shared<Tape>(t);
-            IntervalEvaluator e(p);
+            auto op = (libfive::Opcode::Opcode)i;
+            Tree t = (Opcode::args(op) == 2 ? Tree::binary(op, Tree::X(), Tree(5))
+                                            : Tree::unary(op, Tree::X()));
+            IntervalEvaluator e(t);
             e.eval({0, 0, 0}, {1, 1, 1});
             REQUIRE(true /* No crash! */ );
         }
@@ -56,21 +47,28 @@ TEST_CASE("IntervalEvaluator::eval")
 
     SECTION("Bounds growth")
     {
-        IntervalEvaluator e(std::make_shared<Tape>(
-            (Tree::X() + Tree::Y()) * (Tree::X() - Tree::Y())));
+        IntervalEvaluator e(
+            (Tree::X() + Tree::Y()) * (Tree::X() - Tree::Y()));
 
         auto o = e.eval({0, 0, 0}, {1, 1, 1});
         REQUIRE(o.lower() == -2);
         REQUIRE(o.upper() == 2);
     }
+
+    SECTION("Division behavior") {
+        IntervalEvaluator e(0.1 / Tree::Y());
+        auto o = e.eval({-0.625, -0.3125, -0.625}, {-0.3125, 0, -0.2125});
+        // Evaluating 0.1 / +-0 should give +-infinity
+        REQUIRE(o.lower() == -std::numeric_limits<float>::infinity());
+        REQUIRE(o.upper() ==  std::numeric_limits<float>::infinity());
+    }
 }
 
-TEST_CASE("IntervalEvaluator::evalAndPush")
+TEST_CASE("IntervalEvaluator::intervalAndPush")
 {
     SECTION("Basic")
     {
-        auto t = std::make_shared<Tape>(
-                min(Tree::X() + 1, Tree::Y() + 1));
+        auto t = std::make_shared<Deck>(min(Tree::X() + 1, Tree::Y() + 1));
         IntervalEvaluator e(t);
 
         // Store -3 in the rhs's value
@@ -80,18 +78,34 @@ TEST_CASE("IntervalEvaluator::evalAndPush")
 
         // Do an interval evaluation that will lead to disabling the rhs
         // Pushing should disable the rhs of min
-        auto i = e.evalAndPush({-5, 8, 0}, {-4, 9, 0});
+        auto p = e.intervalAndPush({-5, 8, 0}, {-4, 9, 0});
+        auto i = p.first;
         REQUIRE(i.lower() == -4);
         REQUIRE(i.upper() == -3);
 
         // Check to make sure that the push disabled something
-        CAPTURE(t->utilization());
-        REQUIRE(t->utilization() < 1);
+        REQUIRE(p.second->size() < t->tape->size());
 
         // Require that the evaluation gets 1
         o = e.eval({1, 2, 0}, {1, 2, 0});
         REQUIRE(o.lower() == 2);
         REQUIRE(o.upper() == 2);
+    }
+
+    SECTION("Multi-min trees")
+    {
+        auto t = min(min(Tree::Y(), Tree::X()),
+                     min(Tree::X(), Tree::Y() + 3));
+        auto d = std::make_shared<Deck>(t);
+
+        IntervalEvaluator e(d);
+
+        // Do an interval evaluation that should lead to both sides
+        // picking X, then collapsing min(X, X) into just X.
+        auto i = e.intervalAndPush({-5, 0, 0}, {-4, 1, 0});
+        CAPTURE(d->tape->size());
+        REQUIRE(i.second->size() == 0);
+        REQUIRE(i.second->root() == d->X);
     }
 
     SECTION("With NaNs")
@@ -110,26 +124,116 @@ TEST_CASE("IntervalEvaluator::evalAndPush")
         REQUIRE(ra.contains(target.template cast<double>()));
         REQUIRE(rb.contains(target.template cast<double>()));
 
-        auto tape = std::make_shared<Tape>(tree);
-        IntervalEvaluator eval(tape);
-        ArrayEvaluator eval_(tape);
+        auto deck = std::make_shared<Deck>(tree);
+        IntervalEvaluator eval(deck);
+        Evaluator eval_(deck);
 
-        auto ia = eval.evalAndPush(ra.lower.template cast<float>(),
-                                   ra.upper.template cast<float>());
-        CAPTURE(ia.lower());
-        CAPTURE(ia.upper());
-        CAPTURE(tape->utilization());
-        auto ea = eval_.eval(target);
-        eval.pop();
+        float ea, eb;
+        {
+            auto ia = eval.intervalAndPush(ra.lower.template cast<float>(),
+                                           ra.upper.template cast<float>());
+            CAPTURE(ia.first.lower());
+            CAPTURE(ia.first.upper());
+            CAPTURE(ia.second->size() / (float)deck->tape->size());
+            ea = eval_.value(target);
+        }
 
-        auto ib = eval.evalAndPush(rb.lower.template cast<float>(),
-                                   rb.upper.template cast<float>());
-        CAPTURE(ib.lower());
-        CAPTURE(ib.upper());
-        CAPTURE(tape->utilization());
-        auto eb = eval_.eval(target);
-        eval.pop();
+        {
+            auto ib = eval.intervalAndPush(rb.lower.template cast<float>(),
+                                           rb.upper.template cast<float>());
+            CAPTURE(ib.first.lower());
+            CAPTURE(ib.first.upper());
+            CAPTURE(ib.second->size() / (float)deck->tape->size());
+            eb = eval_.value(target);
+        }
 
         REQUIRE(ea == eb);
+    }
+
+    SECTION("Fuzzing mod operator")
+    {
+        std::list<Interval> i;
+        for (int a=-5; a <= 5; ++a) {
+            for (int b=-5; b <= 5; ++b) {
+                if (a <= b) {
+                    i.push_back({float(a), float(b)});
+                }
+            }
+        }
+        auto m = mod(Tree::X(), Tree::Y());
+        auto deck = std::make_shared<Deck>(m);
+        auto ei = IntervalEvaluator(deck);
+        auto ea = ArrayEvaluator(deck);
+        for (const auto& a : i) {
+            for (const auto& b : i) {
+                auto r = ei.eval({a.lower(), b.lower(), 0.0f},
+                                 {a.upper(), b.upper(), 0.0f},
+                                 deck->tape);
+                CAPTURE(a.lower());
+                CAPTURE(a.upper());
+                CAPTURE(b.lower());
+                CAPTURE(b.upper());
+                CAPTURE(r.lower());
+                CAPTURE(r.upper());
+                const unsigned N = 10;
+                for (unsigned c = 0; c <= N; ++c) {
+                    // This form of interpolation is less intuitive than
+                    //      a.lower() * (c / float(N)) +
+                    //      a.upper() * (1 - c / float(N))
+                    // but does not allow the result to exceed the input
+                    // interval bounds due to floating-point error (which
+                    // the more intuitive approach does allow).
+                    float a_ = a.lower() +
+                               c / float(N) * (a.upper() - a.lower());
+                    for (unsigned d = 0; d <= N; ++d) {
+                        float b_ = b.lower() +
+                                   d / float(N) * (b.upper() - b.lower());
+                        auto v = ea.value({a_, b_, 0.0f});
+                        if (r.isSafe()) {
+                            REQUIRE(v >= r.lower());
+                            REQUIRE(v <= r.upper());
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("IntervalEvaluator::eval(): NaN behavior")
+{
+    SECTION("Input values")
+    {
+        auto t = std::make_shared<Deck>(Tree::X());
+        IntervalEvaluator e(t);
+
+        REQUIRE(e.eval({-1, 1, 0}, {1, 2, 0}).isSafe());
+        REQUIRE(e.eval(
+                {-std::numeric_limits<float>::infinity(), 1, 0},
+                {1, 2, 0}).isSafe());
+    }
+
+    SECTION("Division")
+    {
+        auto t = std::make_shared<Deck>(Tree::X() / Tree::Y());
+        IntervalEvaluator e(t);
+
+        REQUIRE(e.eval({-1, 1, 0}, {1, 2, 0}).isSafe());
+        REQUIRE(!e.eval({-1, 0, 0}, {1, 2, 0}).isSafe());
+        REQUIRE(!e.eval({-1, -1, 0}, {1, 2, 0}).isSafe());
+        REQUIRE(e.eval({1, -1, 0}, {2, 2, 0}).isSafe());
+    }
+
+    SECTION("Multiplication of zero and infinity")
+    {
+        auto t = std::make_shared<Deck>(Tree::Z() * (Tree::X() / Tree::Y()));
+        IntervalEvaluator e(t);
+
+        REQUIRE(e.eval({-1, 1, 0}, {1, 2, 0}).isSafe());
+        REQUIRE(!e.eval({-1, 0, 0}, {1, 2, 0}).isSafe());
+        REQUIRE(!e.eval({-1, -1, 1}, {1, 2, 2}).isSafe());
+        REQUIRE(!e.eval({1, -1, -1}, {2, 2, 1}).isSafe());
+        REQUIRE(e.eval({1, -1, 1}, {2, 2, 2}).isSafe());
+        REQUIRE(!e.eval({1, -1, -1}, {2, 2, 2}).isSafe());
     }
 }

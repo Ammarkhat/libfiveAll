@@ -1,26 +1,16 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
+
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #include <libguile.h>
 #include <boost/algorithm/string/predicate.hpp>
-#include "catch.hpp"
 
-#include "libfive-guile.h"
+#include "catch.hpp"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -42,13 +32,15 @@ static std::string eval(std::string input) {
     if (!initialized)
     {
         scm_init_guile();
-        scm_init_libfive_modules();
+        scm_c_eval_string(
+            "(add-to-load-path (string-append (getcwd) \"/../libfive/bind/guile\"))");
         scm_c_use_module("libfive kernel");
         scm_c_use_module("libfive vec");
-        scm_c_use_module("libfive csg");
-        scm_c_use_module("libfive shapes");
         scm_c_use_module("libfive util");
         scm_c_use_module("libfive sandbox");
+        scm_c_use_module("libfive stdlib csg");
+        scm_c_use_module("libfive stdlib shapes");
+        scm_c_use_module("libfive stdlib transforms");
         initialized = true;
     }
 
@@ -144,6 +136,21 @@ TEST_CASE("#[vector notation]")
     REQUIRE(result == "#[1 2.1]");
 }
 
+TEST_CASE("shape-eval")
+{
+    SECTION("NaN") {
+        auto result = eval(
+                "(shape-eval (lambda-shape (x y z) (* x (/ 1 z))) #[0 0 0])");
+        REQUIRE(result == "+nan.0");
+    }
+
+    SECTION("sqrt") {
+        auto result = eval(
+                "(shape-eval (lambda-shape (x y z) (sqrt x)) #[0 0 0])");
+        REQUIRE(result == "0.0");
+    }
+}
+
 TEST_CASE("eval-sandboxed")
 {
     SECTION("Single line")
@@ -167,6 +174,13 @@ TEST_CASE("eval-sandboxed")
         REQUIRE(boost::algorithm::starts_with(result,
             "((error (0 . 0)"));
     }
+
+    SECTION("Parsing variables")
+    {
+        auto a = eval("(eval-sandboxed \"#123\")");
+        CAPTURE(a);
+        REQUIRE(boost::algorithm::starts_with(a, "((valid #<<shape>"));
+    }
 }
 
 TEST_CASE("libfive-guile CSG")
@@ -179,4 +193,23 @@ TEST_CASE("libfive-guile CSG")
 
     CAPTURE(result);
     REQUIRE(boost::algorithm::starts_with(result, "#<<shape> "));
+}
+
+TEST_CASE("libfive-guile: scale-xyz without center position")
+{
+    auto result = eval(R"(
+        (scale-xyz
+            (box #[0 0 0] #[10 10 10])
+            #[1 2 3]
+        ) )");
+
+    CAPTURE(result);
+    REQUIRE(boost::algorithm::starts_with(result, "#<<shape> "));
+}
+
+TEST_CASE("libfive-guile: pi")
+{
+    auto result = eval("pi");
+    CAPTURE(result);
+    REQUIRE(boost::algorithm::starts_with(result, "3.1415"));
 }

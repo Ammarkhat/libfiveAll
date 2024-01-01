@@ -17,17 +17,17 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 #include <QActionGroup>
-#include <QDesktopWidget>
 #include <QFileDialog>
-#include <QProgressDialog>
-#include <QSplitter>
+#include <QFileSystemWatcher>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QProgressDialog>
+#include <QScreen>
+#include <QSplitter>
 
 #include "studio/window.hpp"
 #include "studio/documentation.hpp"
 #include "studio/editor.hpp"
-#include "studio/interpreter.hpp"
 #include "studio/view.hpp"
 
 #include "libfive.h"
@@ -35,37 +35,81 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #define CHECK_UNSAVED() \
 switch (checkUnsaved())                                                     \
 {                                                                           \
-    case QMessageBox::Save:     if (!onSave()) return;  /* FALLTHROUGH */   \
-    case QMessageBox::Ok:                               /* FALLTHROUGH */   \
+    case QMessageBox::Save:     if (!onSave()) return false;                \
+    case QMessageBox::Ok:       /* FALLTHROUGH */                           \
     case QMessageBox::Discard:  break;                                      \
-    case QMessageBox::Cancel:   return;                                     \
+    case QMessageBox::Cancel:   return false;                               \
     default:    assert(false);                                              \
 }
 
-Window::Window(QString target)
-    : QMainWindow(), editor(new Editor), view(new View)
+namespace Studio {
+
+Window::Window(Arguments args)
+    : QMainWindow()
+    , view(new View)
+    , settings("impraxical", "Studio")
 {
-    resize(QDesktopWidget().availableGeometry(this).size() * 0.75);
+    Language::Type language = Language::LANGUAGE_NONE;
+
+    if (args.language != Language::LANGUAGE_NONE)
+    {
+        // give precedence to command line arguments
+        language = args.language;
+    }
+    else if (settings.contains("language"))
+    {
+        // then application settings
+        QString language_str = settings.value("language").toString();
+        if (language_str == "guile")
+            language = Language::LANGUAGE_GUILE;
+        else if (language_str == "python")
+            language = Language::LANGUAGE_PYTHON;
+    }
+    // otherwise the editor will pick the default
+
+    editor = new Editor(language);
+
+    // the first languageChanged signal happens at construction, when we're not yet connected
+    onLanguageChanged();
+    connect(editor, &Editor::languageChanged,
+            this, &Window::onLanguageChanged);
+
+    resize(QGuiApplication::primaryScreen()->availableGeometry().size() * 0.75);
 
     setAcceptDrops(true);
 
-    auto layout = new QSplitter();
-    layout->addWidget(editor);
+    auto layout = new QSplitter(args.vertical ? Qt::Vertical : Qt::Horizontal);
+
+    if (args.vertical)
+    {
+        layout->addWidget(view);
+        layout->addWidget(editor);
+    }
+    else
+    {
+        layout->addWidget(editor);
+        layout->addWidget(view);
+    }
+
     editor->resize(width() * 0.4, editor->height());
-    layout->addWidget(view);
     setCentralWidget(layout);
 
     // Sync document modification state with window
     connect(editor, &Editor::modificationChanged,
             this, &QWidget::setWindowModified);
 
-    // Sync settings with script and vice versa
-    // (the editor breaks the loop by not re-emitting the signal
-    // if no changes are necessary to the block comment)
-    connect(view, &View::settingsChanged,
-            editor, &Editor::onSettingsChanged);
+    // Sync settings from script to viewport
     connect(editor, &Editor::settingsChanged,
             view, &View::onSettingsFromScript);
+
+    // Always run the autoload check, looking at the local
+    // variable to decide whether or not to actually
+    // reload the file.
+    connect(&watcher, &QFileSystemWatcher::fileChanged,
+            this, &Window::onAutoLoad);
+    connect(&watcher, &QFileSystemWatcher::directoryChanged,
+            this, &Window::onAutoLoadPath);
+
 
     // Connect drag start + end signals, so the user can't edit
     // the script while dragging in the 3D viewport
@@ -82,6 +126,9 @@ Window::Window(QString target)
     auto open_action = file_menu->addAction("Open...");
     open_action->setShortcut(QKeySequence::Open);
     connect(open_action, &QAction::triggered, this, &Window::onOpen);
+
+    auto open_viewer = file_menu->addAction("Open as viewer...");
+    connect(open_viewer, &QAction::triggered, this, &Window::onOpenViewer);
 
     // Add a "Revert to saved" item, which is only enabled if there are
     // unsaved changes and there's an existing filename to load from.
@@ -105,8 +152,15 @@ Window::Window(QString target)
 
     file_menu->addSeparator();
 
-    auto export_action = file_menu->addAction("Export...");
+    auto export_action = file_menu->addAction("Export STL...");
+    export_action->setShortcuts({Qt::CTRL | Qt::Key_E, Qt::Key_F7});
     connect(export_action, &QAction::triggered, this, &Window::onExport);
+
+    file_menu->addSeparator();
+
+    auto quit_action = file_menu->addAction("Quit");
+    quit_action->setShortcuts(QKeySequence::Quit);
+    connect(quit_action, &QAction::triggered, this, &Window::onQuit);
 
     // Edit menu
     auto edit_menu = menuBar()->addMenu("&Edit");
@@ -122,41 +176,222 @@ Window::Window(QString target)
     connect(redo_action, &QAction::triggered, editor, &Editor::redo);
     connect(editor, &Editor::redoAvailable, redo_action, &QAction::setEnabled);
 
+    edit_menu->addSeparator();
+
+    auto autoload_action = edit_menu->addAction("Automatically reload changes");
+    connect(autoload_action, &QAction::triggered, this,
+            [&](bool b) { autoreload = b; });
+    autoload_action->setCheckable(true);
+
+    connect(this, &Window::setAutoload, autoload_action,
+            [=](bool b) { autoload_action->setChecked(b);
+                          this->autoreload = b; });
+
     // Settings menu
     auto view_menu = menuBar()->addMenu("&View");
     auto show_axes_action = view_menu->addAction("Show axes");
     show_axes_action->setCheckable(true);
-    show_axes_action->setChecked(true);
-    connect(show_axes_action, &QAction::triggered,
-            view, &View::showAxes);
+    connect(show_axes_action, &QAction::toggled, [this](bool b){
+        view->showAxes(b);
+        settings.setValue("show-axes", b);
+    });
+    show_axes_action->setChecked(settings.value("show-axes", true).toBool());
 
     auto show_bbox_action = view_menu->addAction("Show bounding box(es)");
     show_bbox_action->setCheckable(true);
-    connect(show_bbox_action, &QAction::triggered, view, &View::showBBox);
+    connect(show_bbox_action, &QAction::toggled, [this](bool b) {
+        view->showBBox(b);
+        settings.setValue("show-bounding-box", b);
+    });
+    show_bbox_action->setChecked(settings.value("show-bounding-box", false).toBool());
 
     auto perspective_action = new QAction("Perspective", nullptr);
     auto ortho_action = new QAction("Orthographic", nullptr);
-    view_menu->addSection("Projection");
-    view_menu->addAction(perspective_action);
-    view_menu->addAction(ortho_action);
+    auto proj_menu = new QMenu("Projection");
+    proj_menu->addAction(perspective_action);
+    proj_menu->addAction(ortho_action);
     perspective_action->setCheckable(true);
-    perspective_action->setChecked(true);
     ortho_action->setCheckable(true);
-    auto projection = new QActionGroup(view_menu);
+    auto projection = new QActionGroup(proj_menu);
     projection->addAction(perspective_action);
     projection->addAction(ortho_action);
-    connect(perspective_action, &QAction::triggered,
-            view, &View::toPerspective);
-    connect(ortho_action, &QAction::triggered,
-            view, &View::toOrthographic);
+    connect(perspective_action, &QAction::toggled, [this](bool b) {
+        if (!b) return;
+        view->toPerspective();
+        settings.setValue("projection", "perspective");
+    });
+    connect(ortho_action, &QAction::toggled, [this](bool b) {
+        if (!b) return;
+        view->toOrthographic();
+        settings.setValue("projection", "orthographic");
+    });
+    view_menu->addMenu(proj_menu);
+    if (settings.value("projection", "").toString() == "orthographic")
+        ortho_action->setChecked(true);
+    else
+        perspective_action->setChecked(true);
+
+    auto turn_z_up = new QAction("Turntable (Z up)", nullptr);
+    auto turn_y_up = new QAction("Turntable (Y up)", nullptr);
+    auto rotation_menu = new QMenu("Rotation mode");
+    rotation_menu->addAction(turn_z_up);
+    rotation_menu->addAction(turn_y_up);
+    turn_z_up->setCheckable(true);
+    turn_y_up->setCheckable(true);
+    auto rot_mode = new QActionGroup(rotation_menu);
+    rot_mode->addAction(turn_z_up);
+    rot_mode->addAction(turn_y_up);
+    connect(turn_z_up, &QAction::toggled, [this](bool b) {
+        if (!b) return;
+        view->toTurnZ();
+        settings.setValue("rotation", "turntable-z-up");
+    });
+    connect(turn_y_up, &QAction::toggled, [this](bool b) {
+        if (!b) return;
+        view->toTurnY();
+        settings.setValue("rotation", "turntable-y-up");
+    });
+    view_menu->addMenu(rotation_menu);
+    if (settings.value("rotation", "").toString() == "turntable-y-up")
+        turn_y_up->setChecked(true);
+    else
+        turn_z_up->setChecked(true);
+
+    auto sensitivity_low = new QAction("Low", nullptr);
+    auto sensitivity_medium = new QAction("Medium", nullptr);
+    auto sensitivity_high = new QAction("High", nullptr);
+    auto sensitivity_menu = new QMenu("Rotation sensitivity");
+    sensitivity_menu->addAction(sensitivity_low);
+    sensitivity_menu->addAction(sensitivity_medium);
+    sensitivity_menu->addAction(sensitivity_high);
+    sensitivity_low->setCheckable(true);
+    sensitivity_medium->setCheckable(true);
+    sensitivity_high->setCheckable(true);
+    auto sense_mode = new QActionGroup(sensitivity_menu);
+    sense_mode->addAction(sensitivity_low);
+    sense_mode->addAction(sensitivity_medium);
+    sense_mode->addAction(sensitivity_high);
+    connect(sensitivity_low, &QAction::toggled, [this](bool b) {
+        if (!b) return;
+        view->setLowRotSensitivity();
+        settings.setValue("rotation-sensitvity", "low");
+    });
+    connect(sensitivity_medium, &QAction::toggled, [this](bool b) {
+        if (!b) return;
+        view->setMedRotSensitivity();
+        settings.setValue("rotation-sensitvity", "medium");
+    });
+    connect(sensitivity_high, &QAction::toggled, [this](bool b) {
+        if (!b) return;
+        view->setHighRotSensitivity();
+        settings.setValue("rotation-sensitvity", "high");
+    });
+    view_menu->addMenu(sensitivity_menu);
+    QString rotation_setting = settings.value("rotation-sensitvity", "").toString();
+    if (rotation_setting == "low")
+        sensitivity_low->setChecked(true);
+    else if (rotation_setting == "high")
+        sensitivity_high->setChecked(true);
+    else
+        sensitivity_medium->setChecked(true);
+
+    auto cursor_centric = new QAction("Cursor", nullptr);
+    auto scene_centric = new QAction("Scene", nullptr);
+    auto zoom_menu = new QMenu("Zoom center");
+    zoom_menu->addAction(cursor_centric);
+    zoom_menu->addAction(scene_centric);
+    cursor_centric->setCheckable(true);
+    scene_centric->setCheckable(true);
+    auto zoom_mode = new QActionGroup(zoom_menu);
+    zoom_mode->addAction(cursor_centric);
+    zoom_mode->addAction(scene_centric);
+    connect(cursor_centric, &QAction::toggled, [this](bool b) {
+        if (!b) return;
+        view->setZoomCursorCentric();
+        settings.setValue("zoom-center", "cursor");
+    });
+    connect(scene_centric, &QAction::toggled, [this](bool b) {
+        if (!b) return;
+        view->setZoomSceneCentric();
+        settings.setValue("zoom-center", "scene");
+    });
+    view_menu->addMenu(zoom_menu);
+    if (settings.value("zoom-center", "").toString() == "scene")
+        scene_centric->setChecked(true);
+    else
+        cursor_centric->setChecked(true);
 
     view_menu->addSeparator();
-    auto edit_bounds_action = new QAction("Edit bounds", nullptr);
-    view_menu->addAction(edit_bounds_action);
-    connect(edit_bounds_action, &QAction::triggered, view, &View::openSettings);
     auto zoom_to_action = new QAction("Zoom to bounds", nullptr);
     view_menu->addAction(zoom_to_action);
     connect(zoom_to_action, &QAction::triggered, view, &View::zoomTo);
+
+    // Debug menu
+    auto debug_menu = menuBar()->addMenu("Debug");
+    auto dc_meshing = new QAction("Dual contouring", nullptr);
+    auto iso_meshing = new QAction("Iso-simplex", nullptr);
+    auto hybrid_meshing = new QAction("Hybrid", nullptr);
+    auto meshing_menu = new QMenu("Meshing algorithm");
+    auto meshing_mode = new QActionGroup(meshing_menu);
+    debug_menu->addMenu(meshing_menu);
+
+    for (auto& m : { dc_meshing, iso_meshing, hybrid_meshing }) {
+        meshing_menu->addAction(m);
+        meshing_mode->addAction(m);
+        m->setCheckable(true);
+    }
+    connect(dc_meshing, &QAction::toggled, [this](bool b) {
+        if (!b) return;
+        view->toDCMeshing();
+        settings.setValue("meshing-algorithm", "dual-contouring");
+    });
+    connect(iso_meshing, &QAction::toggled, [this](bool b) {
+        if (!b) return;
+        view->toIsoMeshing();
+        settings.setValue("meshing-algorithm", "iso-simplex");
+    });
+    connect(hybrid_meshing, &QAction::toggled, [this](bool b) {
+        if (!b) return;
+        view->toHybridMeshing();
+        settings.setValue("meshing-algorithm", "hybrid");
+    });
+    QString algorithm_setting = settings.value("meshing-algorithm", "").toString();
+    if (algorithm_setting == "iso-simplex")
+        iso_meshing->setChecked(true);
+    else if (algorithm_setting == "hybrid")
+        hybrid_meshing->setChecked(true);
+    else
+        dc_meshing->setChecked(true);
+
+    auto lang_menu = menuBar()->addMenu("Language");
+    auto lang_guile = new QAction("Guile Scheme", nullptr);
+    auto lang_python = new QAction("Python", nullptr);
+    auto lang_group = new QActionGroup(lang_menu);
+    for (auto& m : { lang_guile, lang_python }) {
+        lang_menu->addAction(m);
+        lang_group->addAction(m);
+        m->setCheckable(true);
+    }
+    lang_menu->addSeparator();
+    auto lang_load_default = new QAction("Load default script", nullptr);
+    lang_menu->addAction(lang_load_default);
+    switch (editor->getLanguage()) {
+        case Language::LANGUAGE_GUILE: lang_guile->setChecked(true); break;
+        case Language::LANGUAGE_PYTHON: lang_python->setChecked(true); break;
+        case Language::LANGUAGE_NONE: break;
+    }
+    connect(lang_guile, &QAction::triggered,
+            this, [=](bool){ setLanguage(Language::LANGUAGE_GUILE); });
+    connect(lang_python, &QAction::triggered,
+            this, [=](bool){ setLanguage(Language::LANGUAGE_PYTHON); });
+    connect(lang_load_default, &QAction::triggered,
+            this, &Window::onLoadDefault);
+    if (!Editor::supportsLanguage(Language::LANGUAGE_GUILE)) {
+        lang_guile->setEnabled(false);
+    }
+    if (!Editor::supportsLanguage(Language::LANGUAGE_PYTHON)) {
+        lang_python->setEnabled(false);
+    }
 
     // Help menu
     auto help_menu = menuBar()->addMenu("Help");
@@ -165,77 +400,78 @@ Window::Window(QString target)
     connect(help_menu->addAction("Load tutorial"), &QAction::triggered,
             this, &Window::onLoadTutorial);
     auto ref_action = help_menu->addAction("Shape reference");
-    ref_action->setShortcut(QKeySequence(Qt::CTRL + Qt::Key_Slash));
-    connect(ref_action, &QAction::triggered, this, &Window::onShowDocs);
+    ref_action->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Slash));
+    connect(ref_action, &QAction::triggered, editor, &Editor::onShowDocs);
 
-    // Start embedded Guile interpreter
-    auto interpreter = new Interpreter();
-    connect(editor, &Editor::scriptChanged,
-            interpreter, &Interpreter::onScriptChanged);
-
-    connect(interpreter, &Interpreter::busy, editor, &Editor::onBusy);
-    connect(interpreter, &Interpreter::gotResult, editor, &Editor::onResult);
-    connect(interpreter, &Interpreter::gotError, editor, &Editor::onError);
-    connect(interpreter, &Interpreter::keywords, editor, &Editor::setKeywords);
-    connect(interpreter, &Interpreter::docs, this, &Window::setDocs);
-    connect(interpreter, &Interpreter::gotShapes, view, &View::setShapes);
-    connect(interpreter, &Interpreter::gotVars,
-            editor, &Editor::setVarPositions);
+    // Link up the editor and the view
+    connect(editor, &Editor::shapes, view, &View::setShapes);
     connect(view, &View::varsDragged, editor, &Editor::setVarValues);
 
-    interpreter->start();
-
+    #if defined(Q_OS_LINUX) || defined(Q_OS_WIN)
+        setWindowTitle("Studio[*]");
+    #endif
     show();
 
-    {   //  Load the tutorial file on first run if there's no target
-        QSettings settings("impraxical", "Studio");
-        if (settings.contains("first-run") &&
-            settings.value("first-run").toBool() &&
-            target.isNull())
-        {
-            target = ":/examples/tutorial.io";
-        }
-        settings.setValue("first-run", false);
-    }
-
-    if (!target.isEmpty() && loadFile(target))
+    if (settings.value("first-run", true).toBool() &&
+        args.filename.isEmpty())
     {
-        setFilename(target);
+        args.filename = ":/examples/tutorial.io";
+    }
+    settings.setValue("first-run", false);
+
+    onNew();
+    if (!args.filename.isEmpty() && loadFile(args.filename))
+    {
+        setFilename(args.filename);
     }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void Window::openFile(const QString& name)
+bool Window::openFile(const QString& name)
 {
     CHECK_UNSAVED();
 
     if (loadFile(name))
     {
         setFilename(name);
+        return true;
     }
+    emit(setAutoload(false));
+    return false;
 }
 
-void Window::onOpen(bool)
+bool Window::onOpen(bool)
 {
     CHECK_UNSAVED();
 
-    QString f = QFileDialog::getOpenFileName(nullptr, "Open",
-            workingDirectory(), "*.io;;*.ao");
-    if (!f.isEmpty() && loadFile(f))
+    QString f = QFileDialog::getOpenFileName(this, "Open",
+            workingDirectory(), "Studio (*.io *.py);;Any files (*)");
+    if (!f.isEmpty())
     {
-        setFilename(f);
+        return openFile(f);
     }
+    return false;
 }
 
-void Window::onRevert(bool)
+bool Window::onOpenViewer(bool)
+{
+    auto result = onOpen();
+    if (result)
+    {
+        emit(setAutoload(true));
+    }
+    return result;
+}
+
+bool Window::onRevert(bool)
 {
     CHECK_UNSAVED();
     Q_ASSERT(!filename.isEmpty());
-    loadFile(filename);
+    return loadFile(filename);
 }
 
-bool Window::loadFile(QString f)
+bool Window::loadFile(QString f, bool reload)
 {
     QFile file(f);
     if (!file.open(QIODevice::ReadOnly))
@@ -251,9 +487,52 @@ bool Window::loadFile(QString f)
     }
     else
     {
-        editor->setScript(file.readAll());
+        editor->setScript(file.readAll(), reload);
         editor->setModified(false);
+        editor->guessLanguage(QFileInfo(file.fileName()).suffix().toLower());
         return true;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+void Window::onAutoLoad(const QString&)
+{
+    if (QFile(filename).open(QIODevice::ReadOnly))
+    {
+        if (autoreload)
+        {
+            Q_ASSERT(!filename.isEmpty());
+            loadFile(filename, true);
+        }
+
+        // Some editors don't edit but replace the file so the watcher thinks
+        // the file was deleted and the signal is only sent once.
+        // Re-watching the file is mandatory for those cases.
+        if (QFile::exists(filename)) {
+            watcher.addPath(filename);
+        }
+    }
+    else // File was deleted. Waiting for new file
+    {
+        watcher.addPath(QFileInfo(filename).path());
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+void Window::onAutoLoadPath(const QString&)
+{
+    // file was created
+    if (QFile(filename).open(QIODevice::ReadOnly))
+    {
+        watcher.removePaths(watcher.directories());
+        watcher.addPath(filename);
+        if (autoreload)
+        {
+            Q_ASSERT(!filename.isEmpty());
+            loadFile(filename, true);
+        }
     }
 }
 
@@ -309,16 +588,11 @@ bool Window::onSave(bool)
 
 bool Window::onSaveAs(bool)
 {
-    QString f = QFileDialog::getSaveFileName(nullptr, "Save as",
-            workingDirectory(), "*.io");
+    QString f = QFileDialog::getSaveFileName(this, "Save as",
+            workingDirectory(),
+            QString("Studio (*%1);;Any files (*)").arg(editor->getExtension()));
     if (!f.isEmpty())
     {
-#ifdef Q_OS_LINUX
-        if (!f.endsWith(".io"))
-        {
-            f += ".io";
-        }
-#endif
         if (saveFile(f))
         {
             setFilename(f);
@@ -330,13 +604,9 @@ bool Window::onSaveAs(bool)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void Window::onNew(bool)
+bool Window::onNew(bool)
 {
-    CHECK_UNSAVED();
-
-    setFilename("");
-    editor->setScript("");
-    editor->setModified(false);
+    return reset(Language::LANGUAGE_NONE);
 }
 
 void Window::closeEvent(QCloseEvent* event)
@@ -378,7 +648,7 @@ void Window::dragEnterEvent(QDragEnterEvent* event)
     }
 }
 
-void Window::dropEvent(QDropEvent* event)
+bool Window::dropEvent_(QDropEvent* event)
 {
     CHECK_UNSAVED();
 
@@ -386,7 +656,14 @@ void Window::dropEvent(QDropEvent* event)
     if (!f.isEmpty() && loadFile(f))
     {
         setFilename(f);
+        return true;
     }
+    return false;
+}
+
+void Window::dropEvent(QDropEvent* event)
+{
+    dropEvent_(event);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -416,12 +693,33 @@ void Window::setFilename(const QString& f)
     filename = f;
     if (filename.startsWith(":/"))
     {
-        setWindowTitle(QFileInfo(filename).fileName() + " (read-only)");
+        QString title = QFileInfo(filename).fileName() + " (read-only)";
+        #if defined(Q_OS_LINUX) || defined(Q_OS_WIN)
+            setWindowTitle(title+"[*]");
+        #else
+            setWindowTitle(title);
+        #endif
     }
     else
     {
-        setWindowTitle(QString());
+        #if defined(Q_OS_LINUX) || defined(Q_OS_WIN)
+            setWindowTitle(QFileInfo(filename).fileName() + "[*]");
+        #else
+            setWindowTitle(QString());
+        #endif
         setWindowFilePath(f);
+    }
+
+    // Store the target file as our autoreload target
+    // (even though we'll only do reloading if the menu option is set)
+    auto watched_files = watcher.files();
+    if (!watched_files.empty())
+    {
+        watcher.removePaths(watched_files);
+    }
+    if (!filename.startsWith(":/") && !filename.isEmpty())
+    {
+        watcher.addPath(filename);
     }
 }
 
@@ -434,11 +732,11 @@ QString Window::workingDirectory() const
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void Window::onExportReady(QList<const Kernel::Mesh*> shapes)
+void Window::onExportReady(QList<const libfive::Mesh*> shapes)
 {
     disconnect(view, &View::meshesReady, this, &Window::onExportReady);
-    if (!Kernel::Mesh::saveSTL(export_filename.toStdString(),
-                               shapes.toStdList()))
+    if (!libfive::Mesh::saveSTL(export_filename.toStdString(),
+                                std::list<const libfive::Mesh*>(shapes.begin(), shapes.end())))
     {
         QMessageBox m(this);
         m.setText("Could not save file");
@@ -454,14 +752,17 @@ void Window::onExportReady(QList<const Kernel::Mesh*> shapes)
 void Window::onExport(bool)
 {
     export_filename = QFileDialog::getSaveFileName(
-            nullptr, "Export", workingDirectory(), "*.stl");
+            this, "Export STL", workingDirectory(), "STL files (*.stl);;Any files (*)");
     if (export_filename.isEmpty())
     {
         return;
     }
+    if (!export_filename.endsWith(".stl", Qt::CaseInsensitive))
+    {
+        export_filename += ".stl";
+    }
 
     connect(view, &View::meshesReady, this, &Window::onExportReady);
-    view->disableSettings();
 
     auto p = new QProgressDialog(this);
     p->setCancelButton(nullptr);
@@ -478,9 +779,6 @@ void Window::onExport(bool)
     // Delete the progress dialog when we finish or cancel the export
     connect(this, &Window::exportDone, p, &QProgressDialog::deleteLater);
     connect(p, &QProgressDialog::rejected, p, &QProgressDialog::deleteLater);
-
-    // When the progress dialog is destroyed, re-enable settings
-    connect(p, &QProgressDialog::destroyed, view, &View::enableSettings);
 
     p->show();
     view->checkMeshes();
@@ -514,7 +812,7 @@ void Window::onAbout(bool)
 #endif
 }
 
-void Window::onLoadTutorial(bool)
+bool Window::onLoadTutorial(bool)
 {
     CHECK_UNSAVED();
 
@@ -522,18 +820,50 @@ void Window::onLoadTutorial(bool)
     if (loadFile(target))
     {
         setFilename(target);
+        return true;
     }
+    return false;
 }
 
-void Window::setDocs(Documentation* docs)
+bool Window::onLoadDefault(bool)
 {
-    DocumentationPane::setDocs(docs);
+    CHECK_UNSAVED();
+
+    editor->loadDefaultScript();
+    return true;
 }
 
-void Window::onShowDocs(bool)
+void Window::onQuit(bool)
 {
-    if (DocumentationPane::hasDocs())
-    {
-        DocumentationPane::open();
-    }
+    Window::close();
 }
+
+bool Window::reset(Language::Type t) {
+    CHECK_UNSAVED();
+
+    setFilename("");
+    #if defined(Q_OS_LINUX) || defined(Q_OS_WIN)
+        setWindowTitle("Studio[*]");
+    #endif
+
+    if (t != Language::LANGUAGE_NONE) {
+        editor->setLanguage(t);
+    }
+    editor->loadDefaultScript();
+    emit(setAutoload(false));
+    return true;
+}
+
+bool Window::setLanguage(Language::Type t) {
+    return reset(t);
+}
+
+void Window::onLanguageChanged() {
+    Language::Type lang = editor->getLanguage();
+    if (lang == Language::LANGUAGE_GUILE)
+        settings.setValue("language", "guile");
+    else if (lang == Language::LANGUAGE_PYTHON)
+        settings.setValue("language", "python");
+}
+
+}   // namespace Studio

@@ -1,74 +1,141 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
+
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #include "libfive/eval/eval_interval.hpp"
+#include "libfive/eval/deck.hpp"
+#include "libfive/eval/tape.hpp"
+#include "libfive/render/brep/region.hpp"
 
-namespace Kernel {
+namespace libfive {
 
-IntervalEvaluator::IntervalEvaluator(std::shared_ptr<Tape> t)
-    : IntervalEvaluator(t, std::map<Tree::Id, float>())
+IntervalEvaluator::IntervalEvaluator(const Tree& root)
+    : IntervalEvaluator(std::make_shared<Deck>(root))
+{
+    // Nothing to do here
+}
+
+IntervalEvaluator::IntervalEvaluator(const Tree& root,
+                                     const std::map<Tree::Id, float>& vars)
+    : IntervalEvaluator(std::make_shared<Deck>(root), vars)
+{
+    // Nothing to do here
+}
+
+IntervalEvaluator::IntervalEvaluator(std::shared_ptr<Deck> d)
+    : IntervalEvaluator(d, std::map<Tree::Id, float>())
 {
     // Nothing to do here
 }
 
 IntervalEvaluator::IntervalEvaluator(
-        std::shared_ptr<Tape> t, const std::map<Tree::Id, float>& vars)
-    : BaseEvaluator(t, vars)
+        std::shared_ptr<Deck> d, const std::map<Tree::Id, float>& vars)
+    : BaseEvaluator(d, vars)
 {
-    i.resize(tape->num_clauses + 1);
+    i.resize(d->num_clauses + 1);
 
     // Unpack variables into result array
-    for (auto& v : t->vars.right)
+    for (auto& v : d->vars.right)
     {
         auto var = vars.find(v.first);
-        i[v.second] = (var != vars.end()) ? var->second : 0;
+        store((var != vars.end()) ? var->second : 0, v.second);
     }
 
     // Unpack constants into result array
-    for (auto& c : tape->constants)
+    for (auto& c : d->constants)
     {
-        i[c.first] = c.second;
+        store(c.second, c.first);
     }
 }
 
-Interval::I IntervalEvaluator::eval(const Eigen::Vector3f& lower,
-                                    const Eigen::Vector3f& upper)
-{
-    i[tape->X] = {lower.x(), upper.x()};
-    i[tape->Y] = {lower.y(), upper.y()};
-    i[tape->Z] = {lower.z(), upper.z()};
 
-    return i[tape->rwalk(*this)];
+void IntervalEvaluator::store(float f, size_t index)
+{
+    i[index] = Interval(f, f);
 }
 
-Interval::I IntervalEvaluator::evalAndPush(const Eigen::Vector3f& lower,
-                                           const Eigen::Vector3f& upper)
+Interval IntervalEvaluator::eval(const Eigen::Vector3f& lower,
+                                 const Eigen::Vector3f& upper)
 {
-    auto out = eval(lower, upper);
+    return eval(lower, upper, deck->tape);
+}
 
-    tape->push([&](Opcode::Opcode op, Clause::Id /* id */,
-                  Clause::Id a, Clause::Id b)
+Interval IntervalEvaluator::eval(
+        const Eigen::Vector3f& lower,
+        const Eigen::Vector3f& upper,
+        const Tape::Handle& tape)
+{
+    assert(!lower.array().isNaN().any()); // A region's bounds should
+    assert(!upper.array().isNaN().any()); // never be NaN.
+
+    i[deck->X] = {lower.x(), upper.x()};
+    i[deck->Y] = {lower.y(), upper.y()};
+    i[deck->Z] = {lower.z(), upper.z()};
+
+    for (auto& o : deck->oracles)
+    {
+        o->set(lower, upper);
+    }
+
+    deck->bindOracles(*tape);
+    for (auto itr = tape->rbegin(); itr != tape->rend(); ++itr) {
+        (*this)(itr->op, itr->id, itr->a, itr->b);
+    }
+    deck->unbindOracles();
+
+    auto root = tape->root();
+    return i[root];
+}
+
+std::pair<Interval, Tape::Handle> IntervalEvaluator::intervalAndPush(
+        const Eigen::Vector3f& lower,
+        const Eigen::Vector3f& upper)
+{
+    return intervalAndPush(lower, upper, deck->tape);
+}
+
+std::pair<Interval, Tape::Handle> IntervalEvaluator::intervalAndPush(
+        const Eigen::Vector3f& lower,
+        const Eigen::Vector3f& upper,
+        const Tape::Handle& tape)
+{
+    auto out = eval(lower, upper, tape);
+    return std::make_pair(out, push(tape));
+}
+
+Tape::Handle IntervalEvaluator::push()
+{
+    return push(deck->tape);
+}
+
+Tape::Handle IntervalEvaluator::push(const Tape::Handle& tape)
+{
+    assert(tape.get() != nullptr);
+
+    const Region<3> R(Eigen::Vector3d(i[deck->X].lower(),
+                                      i[deck->Y].lower(),
+                                      i[deck->Z].lower()),
+                      Eigen::Vector3d(i[deck->X].upper(),
+                                      i[deck->Y].upper(),
+                                      i[deck->Z].upper()));
+    return tape->push(*deck,
+        [&](Opcode::Opcode op, Clause::Id /* id */,
+            Clause::Id a, Clause::Id b)
     {
         // For min and max operations, we may only need to keep one branch
         // active if it is decisively above or below the other branch.
-        if (op == Opcode::MAX)
+        if (op == Opcode::OP_MAX)
         {
-            if (i[a].lower() > i[b].upper())
+            if (a == b)
+            {
+                return Tape::KEEP_A;
+            }
+            else if (i[a].lower() > i[b].upper())
             {
                 return Tape::KEEP_A;
             }
@@ -76,14 +143,15 @@ Interval::I IntervalEvaluator::evalAndPush(const Eigen::Vector3f& lower,
             {
                 return Tape::KEEP_B;
             }
-            else
-            {
-                return Tape::KEEP_BOTH;
-            }
+            return Tape::KEEP_BOTH;
         }
-        else if (op == Opcode::MIN)
+        else if (op == Opcode::OP_MIN)
         {
-            if (i[a].lower() > i[b].upper())
+            if (a == b)
+            {
+                return Tape::KEEP_A;
+            }
+            else if (i[a].lower() > i[b].upper())
             {
                 return Tape::KEEP_B;
             }
@@ -91,28 +159,23 @@ Interval::I IntervalEvaluator::evalAndPush(const Eigen::Vector3f& lower,
             {
                 return Tape::KEEP_A;
             }
-            else
-            {
-                return Tape::KEEP_BOTH;
-            }
+            return Tape::KEEP_BOTH;
         }
         return Tape::KEEP_ALWAYS;
     },
-        Tape::INTERVAL,
-        {{i[tape->X].lower(), i[tape->Y].lower(), i[tape->Z].lower()},
-         {i[tape->X].upper(), i[tape->Y].upper(), i[tape->Z].upper()}});
-    return out;
+    Tape::INTERVAL, R);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 bool IntervalEvaluator::setVar(Tree::Id var, float value)
 {
-    auto v = tape->vars.right.find(var);
-    if (v != tape->vars.right.end())
+    auto v = deck->vars.right.find(var);
+    if (v != deck->vars.right.end())
     {
-        bool changed = i[v->second] != value;
-        i[v->second] = value;
+        const bool changed = (i[v->second].lower() != value) ||
+                             (i[v->second].upper() != value);
+        store(value, v->second);
         return changed;
     }
     else
@@ -124,108 +187,110 @@ bool IntervalEvaluator::setVar(Tree::Id var, float value)
 ////////////////////////////////////////////////////////////////////////////////
 
 void IntervalEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
-                                   Clause::Id a, Clause::Id b)
+                                   Clause::Id a_, Clause::Id b_)
 {
 #define out i[id]
-#define a i[a]
-#define b i[b]
+#define a i[a_]
+#define b i[b_]
+
     switch (op) {
-        case Opcode::ADD:
+        case Opcode::OP_ADD:
             out = a + b;
             break;
-        case Opcode::MUL:
+        case Opcode::OP_MUL:
             out = a * b;
             break;
-        case Opcode::MIN:
-            out = boost::numeric::min(a, b);
+        case Opcode::OP_MIN:
+            out = Interval::min(a, b);
             break;
-        case Opcode::MAX:
-            out = boost::numeric::max(a, b);
+        case Opcode::OP_MAX:
+            out = Interval::max(a, b);
             break;
-        case Opcode::SUB:
+        case Opcode::OP_SUB:
             out = a - b;
             break;
-        case Opcode::DIV:
+        case Opcode::OP_DIV:
             out = a / b;
             break;
-        case Opcode::ATAN2:
-            out = atan2(a, b);
+        case Opcode::OP_ATAN2:
+            out = Interval::atan2(a, b);
             break;
-        case Opcode::POW:
-            out = boost::numeric::pow(a, b.lower());
+        case Opcode::OP_POW:
+            out = Interval::pow(a, b);
             break;
-        case Opcode::NTH_ROOT:
-            out = boost::numeric::nth_root(a, b.lower());
+        case Opcode::OP_NTH_ROOT:
+            out = Interval::nth_root(a, b);
             break;
-        case Opcode::MOD:
-            out = Interval::I(0.0f, b.upper()); // YOLO
+        case Opcode::OP_MOD:
+            out = Interval::mod(a, b);
+            return;
+        case Opcode::OP_NANFILL:
+            out = Interval::nanfill(a, b);
             break;
-        case Opcode::NANFILL:
-            out = (std::isnan(a.lower()) || std::isnan(a.upper())) ? b : a;
+        case Opcode::OP_COMPARE:
+            out = Interval::compare(a, b);
             break;
 
-        case Opcode::SQUARE:
-            out = boost::numeric::square(a);
+        case Opcode::OP_SQUARE:
+            out = Interval::square(a);
             break;
-        case Opcode::SQRT:
-            out = boost::numeric::sqrt(a);
+        case Opcode::OP_SQRT:
+            out = Interval::sqrt(a);
             break;
-        case Opcode::NEG:
+        case Opcode::OP_NEG:
             out = -a;
             break;
-        case Opcode::SIN:
-            out = boost::numeric::sin(a);
+        case Opcode::OP_SIN:
+            out = Interval::sin(a);
             break;
-        case Opcode::COS:
-            out = boost::numeric::cos(a);
+        case Opcode::OP_COS:
+            out = Interval::cos(a);
             break;
-        case Opcode::TAN:
-            out = boost::numeric::tan(a);
+        case Opcode::OP_TAN:
+            out = Interval::tan(a);
             break;
-        case Opcode::ASIN:
-            out = boost::numeric::asin(a);
+        case Opcode::OP_ASIN:
+            out = Interval::asin(a);
             break;
-        case Opcode::ACOS:
-            out = boost::numeric::acos(a);
+        case Opcode::OP_ACOS:
+            out = Interval::acos(a);
             break;
-        case Opcode::ATAN:
-            // If the interval has an infinite bound, then return the largest
-            // possible output interval (of +/- pi/2).  This rescues us from
-            // situations where we do atan(y / x) and the behavior of the
-            // interval changes if you're approaching x = 0 from below versus
-            // from above.
-            out = (std::isinf(a.lower()) || std::isinf(a.upper()))
-                ? Interval::I(-M_PI/2, M_PI/2)
-                : boost::numeric::atan(a);
+        case Opcode::OP_ATAN:
+            out = Interval::atan(a);
             break;
-        case Opcode::EXP:
-            out = boost::numeric::exp(a);
+        case Opcode::OP_EXP:
+            out = Interval::exp(a);
             break;
-        case Opcode::LOG:
-            out = boost::numeric::log(a);
+        case Opcode::OP_LOG:
+            out = Interval::log(a);
             break;
-        case Opcode::ABS:
-            out = boost::numeric::abs(a);
+        case Opcode::OP_ABS:
+            out = Interval::abs(a);
             break;
-        case Opcode::RECIP:
-            out = Interval::I(1,1) / a;
+        case Opcode::OP_RECIP:
+            out = Interval::recip(a);
             break;
 
         case Opcode::CONST_VAR:
             out = a;
             break;
 
+        case Opcode::ORACLE:
+            deck->oracles[a_]->evalInterval(out);
+            break;
+
         case Opcode::INVALID:
-        case Opcode::CONST:
+        case Opcode::CONSTANT:
         case Opcode::VAR_X:
         case Opcode::VAR_Y:
         case Opcode::VAR_Z:
-        case Opcode::VAR:
+        case Opcode::VAR_FREE:
         case Opcode::LAST_OP: assert(false);
     }
+
 #undef out
 #undef a
 #undef b
 }
 
-}   // namespace Kernel
+}   // namespace libfive

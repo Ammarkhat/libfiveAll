@@ -25,13 +25,14 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "studio/axes.hpp"
 #include "studio/background.hpp"
 #include "studio/bbox.hpp"
-#include "studio/bars.hpp"
 #include "studio/busy.hpp"
 #include "studio/camera.hpp"
 #include "studio/shape.hpp"
 #include "studio/settings.hpp"
 
 #include "libfive/eval/eval_jacobian.hpp"
+
+namespace Studio {
 
 class View : public QOpenGLWidget, QOpenGLFunctions
 {
@@ -56,13 +57,23 @@ public:
 
 public slots:
     void setShapes(QList<Shape*> shapes);
-    void openSettings();
     void showAxes(bool a);
     void showBBox(bool b);
 
-    void toOrthographic(bool=false) { camera.toOrthographic();  }
-    void toPerspective(bool=false)  { camera.toPerspective();   }
-    void zoomTo(bool=false) { camera.zoomTo(settings.min, settings.max); }
+    void toOrthographic() { camera.toOrthographic();  }
+    void toPerspective()  { camera.toPerspective();   }
+    void toTurnZ() { camera.toTurnZ();  }
+    void toTurnY()  { camera.toTurnY();   }
+    void setLowRotSensitivity()  { camera.setRotationSensitivity(240); }
+    void setMedRotSensitivity()  { camera.setRotationSensitivity(360); }
+    void setHighRotSensitivity() { camera.setRotationSensitivity(720); }
+    void setZoomCursorCentric() { zoom_cursor_centric = true; }
+    void setZoomSceneCentric() { zoom_cursor_centric = false; }
+    void zoomTo() { camera.zoomTo(settings.min, settings.max); }
+
+    void toDCMeshing();
+    void toIsoMeshing();
+    void toHybridMeshing();
 
     /*
      *  Emits shapesReady if all the shapes being drawn
@@ -76,18 +87,6 @@ public slots:
      */
     void onSettingsFromScript(Settings s, bool first);
 
-    /*
-     *  Called when the settings pane is edited
-     */
-    void onSettingsFromPane(Settings s);
-
-    /*
-     *  Enable and disable settings pane
-     *  (used when exporting)
-     */
-    void disableSettings();
-    void enableSettings();
-
 signals:
     /*
      *  Called to kick off a render and start the busy spinner running
@@ -95,14 +94,9 @@ signals:
     void startRender(Settings s);
 
     /*
-     *  Emitted whenever settings are changed in the pane
-     */
-    void settingsChanged(Settings s);
-
-    /*
      *  Emitted when all shapes are done rendering at their highest resolution
      */
-    void meshesReady(QList<const Kernel::Mesh*> shapes) const;
+    void meshesReady(QList<const libfive::Mesh*> shapes) const;
 
     /*
      *  Indicates when a drag operation begins and ends
@@ -113,7 +107,7 @@ signals:
     /*
      *  Emitted when a drag operation has changed variables
      */
-    void varsDragged(QMap<Kernel::Tree::Id, float> vs);
+    void varsDragged(QMap<libfive::Tree::Id, float> vs);
 
 protected slots:
     void update() { QOpenGLWidget::update(); }
@@ -123,6 +117,8 @@ protected:
     void initializeGL() override;
     void paintGL() override;
     void resizeGL(int width, int height) override;
+
+    void setAlgorithm(libfive::BRepAlgorithm alg);
 
     /*
      *  Converts from mouse event coordinates to model coordinates
@@ -142,13 +138,11 @@ protected:
     Background background;
     BBox bbox;
     Busy busy;
-    Bars bars;
 
     void mouseMoveEvent(QMouseEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
-    void leaveEvent(QEvent* event) override;
 
     /*
      *  Updates hover_target based on mouse cursor position
@@ -169,11 +163,14 @@ protected:
     } mouse;
 
     QList<Shape*> shapes;
-    QPointer<SettingsPane> pane;
     bool settings_enabled=true;
     Settings settings;
+    libfive::BRepAlgorithm alg = libfive::BRepAlgorithm::DUAL_CONTOURING;
+
     bool show_axes=true;
     bool show_bbox=false;
+
+    bool zoom_cursor_centric = true;
 
     /*  Framebuffer to render pick data  */
     QScopedPointer<QOpenGLFramebufferObject> pick_fbo;
@@ -184,7 +181,8 @@ protected:
     /*  Data to handle direct modification of shapes */
     QVector3D drag_start;
     QVector3D drag_dir;
-    QScopedPointer<Kernel::JacobianEvaluator> drag_eval;
+    std::pair<std::unique_ptr<libfive::JacobianEvaluator>,
+              std::shared_ptr<libfive::Tape>> drag_eval;
     Shape* drag_target=nullptr;
     bool drag_valid=false;
     Shape* hover_target=nullptr;
@@ -195,3 +193,5 @@ protected:
     /*  Set to true on the first draw, if the OpenGL version is new enough */
     bool gl_checked=false;
 };
+
+}   // namespace Studio

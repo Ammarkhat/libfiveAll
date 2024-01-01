@@ -1,20 +1,11 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
+
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #include <iostream>
 #include <future>
@@ -26,8 +17,9 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #include <png.h>
 
 #include "libfive/render/discrete/heightmap.hpp"
+#include "libfive/eval/tape.hpp"
 
-namespace Kernel {
+namespace libfive {
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -36,9 +28,9 @@ namespace Kernel {
  */
 struct NormalRenderer
 {
-    NormalRenderer(HeightmapEvaluator* e, const Voxels::View& r,
-                   Heightmap::Normal& norm)
-        : e(e), r(r), norm(norm) {}
+    NormalRenderer(Evaluator* e, const Tape::Handle& tape,
+                   const Voxels::View& r, Heightmap::Normal& norm)
+        : e(e), tape(tape), r(r), norm(norm) {}
 
     /*
      *  Assert on destruction that the normals were flushed
@@ -51,13 +43,13 @@ struct NormalRenderer
     void run()
     {
         // Get derivative array pointers
-        auto ds = e->array.derivs(count).topRows(3).eval();
+        auto ds = e->derivs(count, *tape).topRows(3).eval();
 
         for (size_t i=0; i < count; ++i)
         {
             // Map a scaled normal into the range 0 - 255
             Eigen::Array3i n = (255 *
-                (ds.col(i) / (2 * ds.col(i).matrix().norm()) + 0.5))
+                (ds.col(i).matrix().normalized().array() / 2 + 0.5))
                 .cast<int>();
 
             // Pack the normals and a dummy alpha byte into the image
@@ -79,7 +71,7 @@ struct NormalRenderer
     {
         xs[count] = r.corner.x() + i;
         ys[count] = r.corner.y() + j;
-        e->array.set({r.pts.x()[i], r.pts.y()[j], z}, count++);
+        e->set({r.pts.x()[i], r.pts.y()[j], z}, count++);
 
         // If the gradient array is completely full, execute a
         // calculation that finds normals and blits them to the image
@@ -89,7 +81,8 @@ struct NormalRenderer
         }
     }
 
-    HeightmapEvaluator* e;
+    Evaluator* e;
+    Tape::Handle tape;
     const Voxels::View& r;
     Heightmap::Normal& norm;
 
@@ -112,7 +105,8 @@ for (int i=0; i < r.size.x(); ++i)           \
 /*
  *  Helper functions that evaluates a region of pixels
  */
-void Heightmap::pixels(HeightmapEvaluator* e, const Voxels::View& r)
+void Heightmap::pixels(Evaluator* e, const Tape::Handle& tape,
+                       const Voxels::View& r)
 {
     size_t index = 0;
 
@@ -120,17 +114,17 @@ void Heightmap::pixels(HeightmapEvaluator* e, const Voxels::View& r)
     // (which needs to be obeyed by anything unflattening results)
     VIEW_ITERATE_XYZ(r)
     {
-        e->array.set(
+        e->set(
             {r.pts.x()[i], r.pts.y()[j], r.pts.z()[r.size.z() - k - 1]},
             index++);
     }
 
-    auto out = e->array.values(index);
+    auto out = e->values(index, *tape);
 
     index = 0;
 
     // Helper struct to render normals
-    NormalRenderer nr(e, r, norm);
+    NormalRenderer nr(e, tape, r, norm);
 
     // Unflatten results into the image, breaking out of loops early when a pixel
     // is written (because all subsequent pixels will be below it).
@@ -166,14 +160,15 @@ void Heightmap::pixels(HeightmapEvaluator* e, const Voxels::View& r)
  *
  *  This function is used when marking an Interval as filled
  */
-void Heightmap::fill(HeightmapEvaluator* e, const Voxels::View& r)
+void Heightmap::fill(Evaluator* e, const Tape::Handle& tape,
+                     const Voxels::View& r)
 {
     // Store the maximum z position (which is what we're flooding into
     // the depth image)
     const float z = r.pts.z()[r.size.z() - 1];
 
     // Helper struct to handle normal rendering
-    NormalRenderer nr(e, r, norm);
+    NormalRenderer nr(e, tape, r, norm);
 
     // Iterate over every pixel in the region
     for (int i=0; i < r.size.x(); ++i)
@@ -197,8 +192,8 @@ void Heightmap::fill(HeightmapEvaluator* e, const Voxels::View& r)
 * Helper function that reduces a particular matrix block
 * Returns true if finished, false if aborted
 */
-bool Heightmap::recurse(HeightmapEvaluator* e, const Voxels::View& r,
-                        const std::atomic_bool& abort)
+bool Heightmap::recurse(Evaluator* e, const Tape::Handle& tape,
+                        const Voxels::View& r, const std::atomic_bool& abort)
 {
     // Stop rendering if the abort flag is set
     if (abort.load())
@@ -219,41 +214,35 @@ bool Heightmap::recurse(HeightmapEvaluator* e, const Voxels::View& r,
     // If we're below a certain size, render pixel-by-pixel
     if (r.voxels() <= ArrayEvaluator::N)
     {
-        pixels(e, r);
+        pixels(e, tape, r);
         return true;
     }
 
-    // Do the interval evaluation
-    Interval::I out = e->interval.evalAndPush(r.lower, r.upper);
+    // Do the interval evaluation, storing an tape-popping handle
+    auto result = e->intervalAndPush(r.lower, r.upper, tape);
+    Interval out = result.first;
 
+    bool ret = true;
     // If strictly negative, fill up the block and return
-    if (Interval::isFilled(out))
+    if (out.isFilled())
     {
-        fill(e, r);
+        fill(e, tape, r);
     }
     // Otherwise, recurse if the output interval is ambiguous
-    else if (!Interval::isEmpty(out))
+    else if (!out.isEmpty())
     {
         // Disable inactive nodes in the tree
         auto rs = r.split();
 
         // Since the higher Z region is in the second item of the
         // split, evaluate rs.second then rs.first
-        if (!recurse(e, rs.second, abort))
-        {
-            e->interval.pop();
-            return false;
-        }
-        if (!recurse(e, rs.first, abort))
-        {
-            e->interval.pop();
-            return false;
-        }
+        ret &= recurse(e, result.second, rs.second, abort) &&
+               recurse(e, result.second, rs.first, abort);
     }
-
-    // Re-enable disabled nodes from the tree
-    e->interval.pop();
-    return true;
+    if (result.second != tape) {
+        e->getDeck()->claim(std::move(result.second));
+    }
+    return ret;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -265,13 +254,14 @@ Heightmap::Heightmap(unsigned rows, unsigned cols)
 }
 
 std::unique_ptr<Heightmap> Heightmap::render(
-    const Tree t, Voxels r, const std::atomic_bool& abort,
+    const Tree& t_, Voxels r, const std::atomic_bool& abort,
     size_t workers)
 {
-    std::vector<HeightmapEvaluator*> es;
+    std::vector<Evaluator*> es;
+    const auto t = t_.optimized();
     for (size_t i=0; i < workers; ++i)
     {
-        es.push_back(new HeightmapEvaluator(t));
+        es.push_back(new Evaluator(t));
     }
 
     auto out = render(es, r, abort);
@@ -284,7 +274,7 @@ std::unique_ptr<Heightmap> Heightmap::render(
 }
 
 std::unique_ptr<Heightmap> Heightmap::render(
-        const std::vector<HeightmapEvaluator*>& es, Voxels r,
+        const std::vector<Evaluator*>& es, Voxels r,
         const std::atomic_bool& abort)
 {
     auto out = new Heightmap(r.pts[1].size(), r.pts[0].size());
@@ -310,7 +300,7 @@ std::unique_ptr<Heightmap> Heightmap::render(
     {
         futures.push_back(std::async(std::launch::async,
             [itr, region, &out, &abort](){
-                out->recurse(*itr, region, abort);
+                out->recurse(*itr, (*itr)->getDeck()->tape, region, abort);
             }));
         ++itr;
     }
@@ -412,4 +402,64 @@ bool Heightmap::savePNG(std::string filename)
     return true;
 }
 
-}   // namespace Kernel
+bool Heightmap::saveNormalPNG(std::string filename)
+{
+    if (!boost::algorithm::iends_with(filename, ".png"))
+    {
+        std::cerr << "Heightmap::savePNG: filename \"" << filename
+                  << "\" does not end in .png" << std::endl;
+    }
+
+    // Open up a file for writing
+    FILE* output = fopen(filename.c_str(), "wb");
+    if (output == NULL)
+    {
+        fprintf(stderr, "Failed to open PNG file for writing (errno = %i)\n",
+                errno);
+        return false;
+    }
+
+    // Create a png pointer with the callbacks above
+    png_structp png_ptr = png_create_write_struct(
+        PNG_LIBPNG_VER_STRING, NULL, on_png_error, on_png_warn);
+    if (png_ptr == NULL)
+    {
+        fprintf(stderr, "Failed to allocate png write_struct\n");
+        fclose(output);
+        return false;
+    }
+
+    // Create an info pointer
+    png_infop info_ptr = png_create_info_struct(png_ptr);
+    if (info_ptr == NULL)
+    {
+        fprintf(stderr, "Failed to create png info_struct");
+        png_destroy_write_struct(&png_ptr, &info_ptr);
+        fclose(output);
+        return false;
+    }
+
+    // Set physical vars
+    png_set_IHDR(png_ptr, info_ptr, norm.cols(), norm.rows(), 8,
+                 PNG_COLOR_TYPE_RGBA, PNG_INTERLACE_NONE,
+                 PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
+
+    png_init_io(png_ptr, output);
+
+
+    Eigen::Array<uint32_t, Eigen::Dynamic, Eigen::Dynamic> t = norm.transpose();
+    std::vector<uint8_t*> rows;
+    for (int i=t.cols() - 1; i >= 0; --i)
+    {
+        rows.push_back(reinterpret_cast<uint8_t*>(t.data() + i * t.rows()));
+    }
+
+    png_set_rows(png_ptr, info_ptr, reinterpret_cast<png_bytepp>(&rows[0]));
+    png_write_png(png_ptr, info_ptr, PNG_TRANSFORM_SWAP_ENDIAN, NULL);
+    fclose(output);
+
+    png_destroy_write_struct(&png_ptr, &info_ptr);
+    return true;
+}
+
+}   // namespace libfive

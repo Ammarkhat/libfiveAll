@@ -2,19 +2,9 @@
 libfive: a CAD kernel for modeling with implicit functions
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #pragma once
 
@@ -22,23 +12,49 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "libfive/eval/base.hpp"
 #include "libfive/eval/interval.hpp"
+#include "libfive/eval/clause.hpp"
 
-namespace Kernel {
+namespace libfive {
+// Forward declarations
+class Tape;
+class Tree;
 
-class IntervalEvaluator : public BaseEvaluator
+class IntervalEvaluator : public virtual BaseEvaluator
 {
 public:
-    IntervalEvaluator(std::shared_ptr<Tape> t);
-    IntervalEvaluator(std::shared_ptr<Tape> t,
+    IntervalEvaluator(const Tree& root);
+    IntervalEvaluator(const Tree& root,
+                      const std::map<Tree::Id, float>& vars);
+    IntervalEvaluator(std::shared_ptr<Deck> d);
+    IntervalEvaluator(std::shared_ptr<Deck> d,
                       const std::map<Tree::Id, float>& vars);
 
     /*
      *  Interval evaluation
      */
-    Interval::I eval(const Eigen::Vector3f& lower,
-                     const Eigen::Vector3f& upper);
-    Interval::I evalAndPush(const Eigen::Vector3f& lower,
-                            const Eigen::Vector3f& upper);
+    Interval eval(const Eigen::Vector3f& lower,
+                  const Eigen::Vector3f& upper);
+    Interval eval(const Eigen::Vector3f& lower,
+                  const Eigen::Vector3f& upper,
+                  const std::shared_ptr<Tape>& tape);
+
+    std::pair<Interval, std::shared_ptr<Tape>> intervalAndPush(
+            const Eigen::Vector3f& lower,
+            const Eigen::Vector3f& upper);
+    std::pair<Interval, std::shared_ptr<Tape>> intervalAndPush(
+            const Eigen::Vector3f& lower,
+            const Eigen::Vector3f& upper,
+            const std::shared_ptr<Tape>& tape);
+
+    /*
+     *  Returns a shortened tape based on the most recent evaluation.
+     *
+     *  Normally, this is invoked through intervalAndPush, but in some cases,
+     *  we need to call it as a standalone function.  If you're not using
+     *  Oracles, then you probably don't need to call it.
+     */
+    std::shared_ptr<Tape> push(/* uses top-level tape */);
+    std::shared_ptr<Tape> push(const std::shared_ptr<Tape>& tape);
 
     /*
      *  Changes a variable's value
@@ -49,16 +65,17 @@ public:
     bool setVar(Tree::Id var, float value);
 
 protected:
-    /*  i[clause] is the interval result for that clause */
-    std::vector<Interval::I> i;
+    /*  i[clause] is the interval result for that clause, */
+    std::vector<Interval> i;
+
+     /* Sets i[index] = f and maybe_nan[index] = std::isnan(f) */
+     void store(float f, size_t index);
 
     /*
      *  Per-clause evaluation, used in tape walking
      */
     void operator()(Opcode::Opcode op, Clause::Id id,
                     Clause::Id a, Clause::Id b);
-
-    friend class Tape; // for rwalk<IntervalEvaluator>
 };
 
-}   // namespace Kernel
+}   // namespace libfive

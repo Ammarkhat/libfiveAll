@@ -18,13 +18,12 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 #include "studio/shader.hpp"
 
-namespace Shader
-{
+namespace Studio {
+namespace Shader {
 
 QOpenGLShaderProgram* basic;
 QOpenGLShaderProgram* point;
 QOpenGLShaderProgram* busy;
-QOpenGLShaderProgram* bars;
 QOpenGLShaderProgram* line;
 
 void initializeGL()
@@ -41,8 +40,8 @@ void initializeGL()
 
     basic = build("basic", "basic");
     busy = build("basic", "busy");
-    bars = build("basic", "bars");
     line = build("line", "basic");
 }
 
-}
+}   // namespace Shader
+}   // namespace Studio

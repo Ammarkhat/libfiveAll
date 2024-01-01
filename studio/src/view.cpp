@@ -26,6 +26,8 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 #include "libfive/solve/solver.hpp"
 
+namespace Studio {
+
 View::View(QWidget* parent)
     : QOpenGLWidget(parent), camera(size()),
       settings(Settings::defaultSettings())
@@ -34,9 +36,9 @@ View::View(QWidget* parent)
 
     connect(&busy, &Busy::redraw, this, &View::update);
     connect(this, &View::startRender, &busy,
-            [&](Settings){ busy.show(); });
+            [&](Settings){ if (shapes.size()) busy.show(); });
     connect(this, &View::meshesReady, &busy,
-            [&](QList<const Kernel::Mesh*>){ busy.hide(); });
+            [&](QList<const libfive::Mesh*>){ busy.hide(); });
     connect(&camera, &Camera::changed, this, &View::update);
 
     connect(&camera, &Camera::animDone, this, &View::redrawPicker);
@@ -58,20 +60,43 @@ View::~View()
 
 void View::setShapes(QList<Shape*> new_shapes)
 {
+    // We're going to co-optimize every single new and old tree together,
+    // so that we can deduplicate them.  This could be expensive; if we
+    // notice the main thread lagging, we could do the new_shapes half of this
+    // co-optimization on the worker thread, but would then need to pass
+    // the map from the thread.
+    std::unordered_map<libfive::TreeDataKey, libfive::Tree> canonical;
+
     // Pack tree IDs into a pair of sets for fast checking
-    std::map<Kernel::Tree::Id, Shape*> new_shapes_map;
+    std::map<libfive::Tree::Id, Shape*> new_shapes_map;
+    std::map<libfive::Tree::Id, libfive::Tree::Id> new_shapes_canonical;
     for (auto& s : new_shapes)
     {
-        new_shapes_map.insert({s->id(), s});
+        auto c = s->getUniqueId(canonical);
+        new_shapes_canonical.insert({s->id(), c});
+        new_shapes_map.insert({c, s});
     }
 
     // Erase all existing shapes that aren't in the new_shapes list
     bool vars_changed = false;
+    bool any_running = false;
     for (auto itr=shapes.begin(); itr != shapes.end(); /* no update */ )
     {
-        auto n = new_shapes_map.find((*itr)->id());
+        auto n = new_shapes_map.find((*itr)->getUniqueId(canonical));
         if (n == new_shapes_map.end())
         {
+            if (*itr == drag_target)
+            {
+                drag_target->setGrabbed(false);
+                drag_target = nullptr;
+                emit(dragEnd());
+                mouse.state = mouse.RELEASED;
+            }
+            if (*itr == hover_target)
+            {
+                hover_target->setHover(false);
+                hover_target = nullptr;
+            }
             disconnect(*itr, &Shape::redraw, this, &View::update);
             (*itr)->deleteLater();
             itr = shapes.erase(itr);
@@ -80,6 +105,7 @@ void View::setShapes(QList<Shape*> new_shapes)
         else
         {
             vars_changed |= (*itr)->updateFrom(n->second);
+            any_running |= !(*itr)->done();
             new_shapes_map.erase(n);
             ++itr;
         }
@@ -94,16 +120,17 @@ void View::setShapes(QList<Shape*> new_shapes)
     // Connect all new shapes
     for (auto s : new_shapes)
     {
-        if (new_shapes_map.find(s->id()) != new_shapes_map.end())
+        if (new_shapes_map.count(new_shapes_canonical[s->id()]))
         {
             connect(s, &Shape::redraw, this, &View::update);
             connect(s, &Shape::gotMesh, this, &View::checkMeshes);
             connect(s, &Shape::gotMesh, &pick_timer,
-                    static_cast<void (QTimer::*)()>(&QTimer::start));
+                    QOverload<>::of(&QTimer::start));
             connect(this, &View::startRender,
-                    s, static_cast<void (Shape::*)(Settings)>(&Shape::startRender));
-            s->startRender(settings);
+                    s, [=](Settings st) { s->startRender(st, this->alg); });
+            s->startRender(settings, alg);
             s->setParent(this);
+            any_running = true;
 
             shapes.push_back(s);
         }
@@ -111,6 +138,10 @@ void View::setShapes(QList<Shape*> new_shapes)
         {
             s->deleteLater();
         }
+    }
+
+    if (!any_running) {
+        busy.hide();
     }
     update();
 }
@@ -124,76 +155,19 @@ void View::cancelShapes()
     shapes.clear();
 }
 
-void View::openSettings()
-{
-    if (pane.isNull())
-    {
-        pane = new SettingsPane(settings);
-        connect(pane, &SettingsPane::changed,
-                this, &View::onSettingsFromPane);
-        pane->show();
-        pane->setFixedSize(pane->size());
-        if (!settings_enabled)
-        {
-            pane->disable();
-        }
-    }
-    else
-    {
-        pane->setFocus();
-    }
-}
-
-void View::onSettingsFromPane(Settings s)
-{
-    settings = s;
-    startRender(s);
-    emit(settingsChanged(s));
-
-    if (show_bbox)
-    {
-        update();
-    }
-}
-
 void View::onSettingsFromScript(Settings s, bool first)
 {
     if (settings != s)
     {
-        if (pane.isNull())
-        {
-            settings = s;
-            startRender(s);
-        }
-        else
-        {
-            // This ends up calling onSettingsFromPane if anything has changed
-            pane->set(s);
-        }
+        settings = s;
+        update();
+        emit(startRender(s));
     }
 
-    if (first)
+    if (first && shapes.size())
     {
         camera.zoomTo(s.min, s.max);
     }
-}
-
-void View::enableSettings()
-{
-    if (pane)
-    {
-        pane->enable();
-    }
-    settings_enabled = true;
-}
-
-void View::disableSettings()
-{
-    if (pane)
-    {
-        pane->disable();
-    }
-    settings_enabled = false;
 }
 
 void View::initializeGL()
@@ -207,7 +181,6 @@ void View::initializeGL()
     background.initializeGL();
     bbox.initializeGL();
     busy.initializeGL();
-    bars.initializeGL();
 }
 
 void View::redrawPicker()
@@ -220,22 +193,19 @@ void View::redrawPicker()
         return;
     }
 
+    // We may not have the OpenGL context, so we claim it here
+    // (and release it at the bottom if it was claimed)
+    const bool needs_gl = (context() != QOpenGLContext::currentContext());
+    if (needs_gl)
+    {
+        makeCurrent();
+    }
+
     // Rebuild buffer if it is not present or is the wrong size
     if (!pick_fbo.data() ||  pick_fbo->size() != camera.size)
     {
-        bool needs_gl = (context() == QOpenGLContext::currentContext());
-        if (needs_gl)
-        {
-            makeCurrent();
-        }
-
         pick_fbo.reset(new QOpenGLFramebufferObject(
                     camera.size, QOpenGLFramebufferObject::Depth));
-
-        if (needs_gl)
-        {
-            doneCurrent();
-        }
     }
 
     pick_fbo->bind();
@@ -265,7 +235,13 @@ void View::redrawPicker()
     glReadPixels(0, 0, camera.size.width(), camera.size.height(),
                  GL_DEPTH_COMPONENT, GL_FLOAT, pick_depth.data());
 
+    glDisable(GL_DEPTH_TEST);
     pick_fbo->release();
+
+    if (needs_gl)
+    {
+        doneCurrent();
+    }
 }
 
 void View::paintGL()
@@ -342,21 +318,21 @@ void View::paintGL()
     if (drag_target)
     {
         arrow.draw(m, cursor_pos, 0.1 / camera.getScale(),
-                   drag_dir, drag_valid ? Color::green : Color::red);
+                   drag_dir.normalized(),
+                   drag_valid ? Color::green : Color::red);
     }
 
     // This is a no-op if the spinner is hidden
     busy.draw(camera.size);
 
-    // Draw hamburger menu
-    bars.draw(camera.size);
     glDisable(GL_DEPTH_TEST);
     painter.endNativePainting();
 
     if (cursor_pos_valid)
     {
         QFont font = painter.font();
-        font.setFamily("Courier");
+        font.setFamily("Inconsolata");
+        font.setPointSize(14);
         painter.setFont(font);
 
         painter.setBrush(Qt::NoBrush);
@@ -388,6 +364,7 @@ void View::syncPicker()
 void View::mouseMoveEvent(QMouseEvent* event)
 {
     QOpenGLWidget::mouseMoveEvent(event);
+    event->accept();
 
     if (mouse.state == mouse.DRAG_ROT)
     {
@@ -417,9 +394,11 @@ void View::mouseMoveEvent(QMouseEvent* event)
             drag_dir * QVector3D::dotProduct(cursor_pos - drag_start, n2) /
             QVector3D::dotProduct(drag_dir, n2);
 
-        auto sol = Kernel::Solver::findRoot(*drag_eval, drag_target->getVars(),
+        auto sol = libfive::Solver::findRoot(
+                *drag_eval.first, drag_eval.second,
+                drag_target->getVars(),
                 {cursor_pos.x(), cursor_pos.y(), cursor_pos.z()});
-        emit(varsDragged(QMap<Kernel::Tree::Id, float>(sol.second)));
+        emit(varsDragged(QMap<libfive::Tree::Id, float>(sol.second)));
 
         drag_valid = fabs(sol.first) < 1e-6;
         bool changed = false;
@@ -431,11 +410,6 @@ void View::mouseMoveEvent(QMouseEvent* event)
         {
             busy.show();
         }
-    }
-    else if (bars.hover(event->pos().x() > camera.size.width() - bars.side &&
-                        event->pos().y() < bars.side))
-    {
-        update();
     }
     else
     {
@@ -458,23 +432,19 @@ QVector3D View::toModelPos(QPoint pt) const
 
 QVector3D View::toModelPos(QPoint pt, float z) const
 {
-    return camera.M().inverted() * QVector3D(
+    return camera.M().inverted().map(QVector3D(
             (pt.x() * 2.0) / pick_img.width() - 1,
-            1 - (pt.y() * 2.0) / pick_img.height(), z);
+            1 - (pt.y() * 2.0) / pick_img.height(), z));
 }
 
 void View::mousePressEvent(QMouseEvent* event)
 {
     QOpenGLWidget::mousePressEvent(event);
+    event->accept();
 
     if (mouse.state == mouse.RELEASED)
     {
-        if (event->pos().x() > camera.size.width() - bars.side &&
-            event->pos().y() < bars.side)
-        {
-            openSettings();
-        }
-        else if (event->button() == Qt::LeftButton)
+        if (event->button() == Qt::LeftButton)
         {
             syncPicker();
             auto picked = (pick_img.pixel(event->pos()) & 0xFFFFFF);
@@ -487,10 +457,13 @@ void View::mousePressEvent(QMouseEvent* event)
                 drag_valid = true;
 
                 drag_start = toModelPos(event->pos());
-                drag_eval.reset(drag_target->dragFrom(drag_start));
+                auto df = drag_target->dragFrom(drag_start);
+                drag_eval.first.reset(df.first);
+                drag_eval.second = df.second;
 
-                auto norm = drag_eval->deriv(
-                        {drag_start.x(), drag_start.y(), drag_start.z()});
+                auto norm = drag_eval.first->deriv(
+                        {drag_start.x(), drag_start.y(), drag_start.z()},
+                        *df.second);
                 drag_dir = {norm.x(), norm.y(), norm.z()};
 
                 mouse.state = mouse.DRAG_EVAL;
@@ -511,6 +484,7 @@ void View::mousePressEvent(QMouseEvent* event)
 void View::mouseReleaseEvent(QMouseEvent* event)
 {
     QOpenGLWidget::mouseReleaseEvent(event);
+    event->accept();
     if (mouse.state != mouse.RELEASED)
     {
         redrawPicker();
@@ -528,18 +502,11 @@ void View::mouseReleaseEvent(QMouseEvent* event)
 void View::wheelEvent(QWheelEvent *event)
 {
     QOpenGLWidget::wheelEvent(event);
-    camera.zoomIncremental(event->angleDelta().y(), mouse.pos);
+    event->accept();
+    const QPoint& center = zoom_cursor_centric ? mouse.pos : rect().center();
+    camera.zoomIncremental(event->angleDelta().y(), center);
     update();
     pick_timer.start();
-}
-
-void View::leaveEvent(QEvent* event)
-{
-    QOpenGLWidget::leaveEvent(event);
-    if (bars.hover(false))
-    {
-        update();
-    }
 }
 
 void View::checkHoverTarget(QPoint pos)
@@ -587,10 +554,35 @@ void View::showBBox(bool b)
     update();
 }
 
+void View::toDCMeshing()
+{
+    setAlgorithm(libfive::DUAL_CONTOURING);
+}
+
+void View::toIsoMeshing()
+{
+    setAlgorithm(libfive::ISO_SIMPLEX);
+}
+
+void View::toHybridMeshing()
+{
+    setAlgorithm(libfive::HYBRID);
+}
+
+void View::setAlgorithm(libfive::BRepAlgorithm a)
+{
+    if (a != alg) {
+        alg = a;
+        for (auto& s : shapes) {
+            s->startRender(settings, alg);
+        }
+    }
+}
+
 void View::checkMeshes() const
 {
     bool all_done = true;
-    QList<const Kernel::Mesh*> meshes;
+    QList<const libfive::Mesh*> meshes;
     for (auto s : shapes)
     {
         if (s->done())
@@ -607,3 +599,5 @@ void View::checkMeshes() const
         emit(meshesReady(meshes));
     }
 }
+
+}   // namespace Studio
