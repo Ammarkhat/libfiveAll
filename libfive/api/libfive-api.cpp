@@ -26,6 +26,14 @@ Kernel::Tree sphereOld(float radius, float cx, float cy, float cz){
   auto out = (x * x) + (y * y) + (z * z) - r;
   return out;
 }
+struct TreeVec2 {
+    Tree x, y;
+};
+struct TreeVec3 {
+    Tree x, y, z;
+};
+typedef Tree TreeFloat;
+
 Tree _union(Tree a, Tree b) {
     return min(a, b);
 }
@@ -56,6 +64,23 @@ Tree sphere(float r, float cx, float cy, float cz) {
     LIBFIVE_DEFINE_XYZ();
     return move(sqrt(square(x) + square(y) + square(z)) - r, cx, cy, cz);
 }
+
+Tree extrude_z(Tree t, TreeFloat zmin, TreeFloat zmax) {
+    LIBFIVE_DEFINE_XYZ();
+    return max(t, max(zmin - z, z - zmax));
+}
+
+Tree rectangle(TreeVec2 a, TreeVec2 b) {
+    LIBFIVE_DEFINE_XYZ();
+    return max(
+        max(a.x - x, x - b.x),
+        max(a.y - y, y - b.y));
+}
+
+Tree box_mitered(TreeVec3 a, TreeVec3 b) {
+    return extrude_z(rectangle({a.x, a.y}, {b.x, b.y}), a.z, b.z);
+}
+
 
 
 vector<string> splitBySpaces(string s)
@@ -584,10 +609,14 @@ void meshImplicitFunction(std::string implicitString, float resolution, float ma
 // auto out = intersection(firstDifference,parentOffset);
 
   // std::cout << "Tree: " << libfive_tree_print(&out) << "\n";
-  auto out = parseImplicitString(implicitString);
-
+  auto out_parse = parseImplicitString(implicitString);
+  
   // The value for `max_err` is cargo-culted from its default value.
-  Region<3> bds({-100, -100, -100}, {100, 100, 100});
+  Region<3> bds({-150, -80, -150}, {150, 150, 150});
+  auto bds_box = box_mitered({-149, -79, -149}, {149, 149, 149});
+  auto out = intersection(bds_box, out_parse);
+
+
   //findBounds(out)
   Kernel::Mesh::render(out, bds, 1.0/resolution, maxError, false)->saveSTL(OUTPUT_FILENAME);
 
