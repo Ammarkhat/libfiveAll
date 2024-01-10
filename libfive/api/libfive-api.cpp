@@ -102,8 +102,18 @@ int parseNode(Node* parentNode, vector<string> words, int i){
         }
     }else if(word == "offset"){
         node.type = "offset";
-        node.data.push_back(stod(words[i+1]));
+        node.data.push_back(stod(words[i+2]));
         nextPosition = parseNode(&node, words, i+3);
+        parentNode->children.push_back(node);
+        if(nextPosition < words.size()-1){
+            nextPosition = parseNode(parentNode, words, nextPosition);
+        }
+     }else if(word == "extend"){
+        node.type = "extend";
+        node.data.push_back(stod(words[i+2]));
+        node.data.push_back(stod(words[i+3]));
+        node.data.push_back(stod(words[i+4]));
+        nextPosition = parseNode(&node, words, i+5);
         parentNode->children.push_back(node);
         if(nextPosition < words.size()-1){
             nextPosition = parseNode(parentNode, words, nextPosition);
@@ -151,6 +161,10 @@ Tree buildTree(Node& root) {
     } else if(root.type == "offset"){
       Tree tr = buildTree(root.children[0]);
       tr = offset(tr, root.data[0]);
+      return tr;
+    } else if(root.type == "extend"){
+      Tree tr = buildTree(root.children[0]);
+      // tr = offset(tr, root.data[0]);
       return tr;
     } else if(root.type == "sphere"){
       return sphere(root.data[0], root.data[1], root.data[2], root.data[3]);
