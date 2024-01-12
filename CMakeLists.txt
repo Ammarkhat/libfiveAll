@@ -105,7 +105,7 @@ if (EMSCRIPTEN)
     # Note: This should really only be in the library-specific `CMakeLists.txt`.
     # add_compile_options(-s USE_LIBPNG=1)
 
-    add_compile_options("SHELL:-s USE_LIBPNG=1" "SHELL:-s USE_BOOST_HEADERS=1")
+    #add_compile_options("SHELL:-s USE_LIBPNG=1" "SHELL:-s USE_BOOST_HEADERS=1")
 
 endif()
 
