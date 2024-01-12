@@ -92,7 +92,7 @@ if (EMSCRIPTEN)
 
     # Don't require memory size to be specified upfront.
     # Only required by STL export example but presumably useful generally.
-    link_libraries("-s ALLOW_MEMORY_GROWTH=1")
+    #link_libraries("-s ALLOW_MEMORY_GROWTH=1")
 
     #link_libraries("-s ENVIRONMENT=web")
     #link_libraries("-s SINGLE_FILE=1")
