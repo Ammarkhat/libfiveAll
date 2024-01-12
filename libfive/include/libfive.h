@@ -35,16 +35,6 @@ struct libfive_vec3      { float x, y, z; };
 struct libfive_vec4      { float x, y, z, w; };
 struct libfive_tri       { uint32_t a, b, c; };
 
-struct libfive_contour {
-    libfive_vec2* pts;
-    uint32_t count;
-};
-
-struct libfive_contours {
-    libfive_contour* cs;
-    uint32_t count;
-};
-
 struct libfive_mesh {
     libfive_vec3* verts;
     libfive_tri* tris;
@@ -52,28 +42,12 @@ struct libfive_mesh {
     uint32_t vert_count;
 };
 
-struct libfive_pixels {
-    bool* pixels;
-    uint32_t width;
-    uint32_t height;
-};
-
 ////////////////////////////////////////////////////////////////////////////////
-
-/*
- *  Frees an libfive_contours data structure
- */
-void libfive_contours_delete(libfive_contours* cs);
 
 /*
  *  Frees an libfive_mesh data structure
  */
 void libfive_mesh_delete(libfive_mesh* m);
-
-/*
- *  Frees an libfive_pixels data structure
- */
-void libfive_pixels_delete(libfive_pixels* ps);
 
 /*
  *  Takes a string description of an op-code ('min', 'max', etc) and

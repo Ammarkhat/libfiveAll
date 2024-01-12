@@ -118,7 +118,7 @@ set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
 ################################################################################
 
-set(CMAKE_CXX_FLAGS "-Wall -Wextra -fPIC -pedantic -Werror=switch")
+set(CMAKE_CXX_FLAGS "-DEMSCRIPTEN_HAS_UNBOUND_TYPE_NAMES=0 -fno-rtti -fno-exceptions -Wall -Wextra -fPIC -pedantic -Werror=switch")
 
 if (LIBFIVE_WITH_MARCH_NATIVE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
@@ -154,7 +154,7 @@ if (LIBFIVE_FIND_PKG_QT)
    find_package(Qt5Core)
 endif()
 
-find_package(Boost REQUIRED)
+#find_package(Boost REQUIRED)
 
 if (LIBFIVE_FIND_PKG_PNG)
    find_package(PNG REQUIRED)

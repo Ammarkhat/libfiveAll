@@ -26,33 +26,17 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #include "libfive/tree/template.hpp"
 
 #include "libfive/render/brep/region.hpp"
-#include "libfive/render/brep/contours.hpp"
+// #include "libfive/render/brep/contours.hpp"
 #include "libfive/render/brep/mesh.hpp"
 
 #include "libfive/solve/bounds.hpp"
 
 using namespace Kernel;
 
-void libfive_contours_delete(libfive_contours* cs)
-{
-    for (unsigned i=0; i < cs->count; ++i)
-    {
-        delete [] cs->cs[i].pts;
-    }
-    delete [] cs->cs;
-    delete cs;
-}
-
 void libfive_mesh_delete(libfive_mesh* m)
 {
     delete [] m->verts;
     delete [] m->tris;
-    delete m;
-}
-
-void libfive_pixels_delete(libfive_pixels* m)
-{
-    delete [] m->pixels;
     delete m;
 }
 
