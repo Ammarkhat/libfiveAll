@@ -99,8 +99,8 @@ public:
         /*
          *  Pushes a Scheme-format serialization to an ostream
          */
-        void print(std::ostream& stream,
-                   Opcode::Opcode prev_op=Opcode::INVALID);
+        // void print(std::ostream& stream,
+        //            Opcode::Opcode prev_op=Opcode::INVALID);
     };
 
     /*  Trees are uniquely identified by their Tree_ address, but we don't
@@ -212,4 +212,4 @@ OP_BINARY(nanfill);
 /*
  *  Deserialize with Scheme-style syntax
  */
-std::ostream& operator<<(std::ostream& stream, const Kernel::Tree& tree);
+// std::ostream& operator<<(std::ostream& stream, const Kernel::Tree& tree);

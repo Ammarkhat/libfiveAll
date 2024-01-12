@@ -16,7 +16,7 @@ You should have received a copy of the GNU Lesser General Public
 License along with this library; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 */
-#include <fstream>
+// #include <fstream>
 #include <boost/algorithm/string/predicate.hpp>
 
 #include "libfive/render/brep/contours.hpp"
@@ -158,63 +158,63 @@ std::unique_ptr<Contours> Contours::render(const Tree t, const Region<2>& r,
     return c;
 }
 
-bool Contours::saveSVG(const std::string& filename)
-{
-    if (!boost::algorithm::iends_with(filename, ".svg"))
-    {
-        std::cerr << "Contours::saveSVG: filename \"" << filename
-                  << "\" does not end in .svg" << std::endl;
-    }
-    std::ofstream file;
-    file.open(filename, std::ios::out);
-    if (!file.is_open())
-    {
-        std::cout << "Contours::saveSVG: could not open " << filename
-                  << std::endl;
-        return false;
-    }
+// bool Contours::saveSVG(const std::string& filename)
+// {
+//     if (!boost::algorithm::iends_with(filename, ".svg"))
+//     {
+//         std::cerr << "Contours::saveSVG: filename \"" << filename
+//                   << "\" does not end in .svg" << std::endl;
+//     }
+//     std::ofstream file;
+//     file.open(filename, std::ios::out);
+//     if (!file.is_open())
+//     {
+//         std::cout << "Contours::saveSVG: could not open " << filename
+//                   << std::endl;
+//         return false;
+//     }
 
-    file <<
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n"
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" version=\"1.1\"\n"
-          " width=\"" << bbox.upper.x() - bbox.lower.x() <<
-        "\" height=\"" << bbox.upper.y() - bbox.lower.y() <<
-        "\" id=\"libfive\">\n";
+//     file <<
+//         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n"
+//         "<svg xmlns=\"http://www.w3.org/2000/svg\" version=\"1.1\"\n"
+//           " width=\"" << bbox.upper.x() - bbox.lower.x() <<
+//         "\" height=\"" << bbox.upper.y() - bbox.lower.y() <<
+//         "\" id=\"libfive\">\n";
 
-    for (const auto& seg : contours)
-    {
-        file << "<path d=\"";
+//     for (const auto& seg : contours)
+//     {
+//         file << "<path d=\"";
 
-        const bool closed = seg.front() == seg.back();
-        auto itr = seg.cbegin();
-        auto end = seg.cend();
-        if (closed)
-        {
-            end--;
-        }
+//         const bool closed = seg.front() == seg.back();
+//         auto itr = seg.cbegin();
+//         auto end = seg.cend();
+//         if (closed)
+//         {
+//             end--;
+//         }
 
-        // Initial move command
-        file << "M " << itr->x() - bbox.lower.x()
-             << ' '  << bbox.upper.y() - itr->y() << ' ';
-        itr++;
+//         // Initial move command
+//         file << "M " << itr->x() - bbox.lower.x()
+//              << ' '  << bbox.upper.y() - itr->y() << ' ';
+//         itr++;
 
-        // Line to commands
-        while (itr != end)
-        {
-            file << "L " << itr->x() - bbox.lower.x()
-                 << ' '  << bbox.upper.y() - itr->y() << ' ';
-            ++itr;
-        }
+//         // Line to commands
+//         while (itr != end)
+//         {
+//             file << "L " << itr->x() - bbox.lower.x()
+//                  << ' '  << bbox.upper.y() - itr->y() << ' ';
+//             ++itr;
+//         }
 
-        if (closed)
-        {
-            file << "Z";
-        }
-        file << "\"\nfill=\"none\" stroke=\"black\" stroke-width=\"0.01\"/>";
-    }
-    file << "\n</svg>";
-    return true;
-}
+//         if (closed)
+//         {
+//             file << "Z";
+//         }
+//         file << "\"\nfill=\"none\" stroke=\"black\" stroke-width=\"0.01\"/>";
+//     }
+//     file << "\n</svg>";
+//     return true;
+// }
 
 
 }   // namespace Kernel

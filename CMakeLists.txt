@@ -75,7 +75,7 @@ if (EMSCRIPTEN)
     set(CMAKE_SHARED_LIBRARY_SUFFIX ".bc")
 
     # Ensures examples/tests produce HTML + JavaScript files.
-    SET(CMAKE_EXECUTABLE_SUFFIX ".html")
+    #SET(CMAKE_EXECUTABLE_SUFFIX ".html")
 
 
     # Note: It's not entirely clear to me what approach is best for
@@ -88,7 +88,7 @@ if (EMSCRIPTEN)
     link_libraries("-s WASM=1")
 
     # Improves debug-ability of exceptions.
-    link_libraries("-s ASSERTIONS=1")
+    #link_libraries("-s ASSERTIONS=1")
 
     # Don't require memory size to be specified upfront.
     # Only required by STL export example but presumably useful generally.

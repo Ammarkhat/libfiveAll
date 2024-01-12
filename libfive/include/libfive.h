@@ -123,8 +123,8 @@ bool libfive_tree_eq(libfive_tree a, libfive_tree b);
 
 void libfive_tree_delete(libfive_tree ptr);
 
-bool libfive_tree_save(libfive_tree ptr, const char* filename);
-libfive_tree libfive_tree_load(const char* filename);
+// bool libfive_tree_save(libfive_tree ptr, const char* filename);
+// libfive_tree libfive_tree_load(const char* filename);
 
 libfive_tree libfive_tree_remap(libfive_tree p,
         libfive_tree x, libfive_tree y, libfive_tree z);
@@ -137,7 +137,7 @@ libfive_region3 libfive_tree_bounds(libfive_tree p);
  *
  *  The caller is responsible for freeing the string with free()
  */
-char* libfive_tree_print(libfive_tree t);
+// char* libfive_tree_print(libfive_tree t);
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -152,30 +152,30 @@ void libfive_set_arg_id(libfive_args* a, uint32_t i, libfive_id id);
 libfive_template libfive_tree_to_template(libfive_tree t);
 libfive_args* libfive_template_args(libfive_template t);
 
-////////////////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////////
 
-/*
- *  Renders a tree to a set of contours
- *
- *  R is a region that will be subdivided into an octree.  For clean
- *  triangles, it should be near-cubical, but that isn't a hard requirement
- *
- *  res should be approximately half the model's smallest feature size;
- *  subdivision halts when all sides of the region are below it.
- *
- *  The returned struct must be freed with libfive_contours_delete
- */
-libfive_contours* libfive_tree_render_slice(libfive_tree tree,
-                                            libfive_region2 R,
-                                            float z, float res);
+// /*
+//  *  Renders a tree to a set of contours
+//  *
+//  *  R is a region that will be subdivided into an octree.  For clean
+//  *  triangles, it should be near-cubical, but that isn't a hard requirement
+//  *
+//  *  res should be approximately half the model's smallest feature size;
+//  *  subdivision halts when all sides of the region are below it.
+//  *
+//  *  The returned struct must be freed with libfive_contours_delete
+//  */
+// libfive_contours* libfive_tree_render_slice(libfive_tree tree,
+//                                             libfive_region2 R,
+//                                             float z, float res);
 
-/*
- *  Renders and saves a slice to a file
- *
- *  See argument details in libfive_tree_render_slice
- */
-void libfive_tree_save_slice(libfive_tree tree, libfive_region2 R,
-                             float z, float res, const char* f);
+// /*
+//  *  Renders and saves a slice to a file
+//  *
+//  *  See argument details in libfive_tree_render_slice
+//  */
+// void libfive_tree_save_slice(libfive_tree tree, libfive_region2 R,
+//                              float z, float res, const char* f);
 
 /*
  *  Renders a tree to a set of triangles
@@ -191,23 +191,14 @@ void libfive_tree_save_slice(libfive_tree tree, libfive_region2 R,
 libfive_mesh* libfive_tree_render_mesh(libfive_tree tree,
                                        libfive_region3 R, float res);
 
-/*
- *  Renders and saves a mesh to a file
- *
- *  Returns true on success, false otherwise
- *  See argument details in libfive_tree_render_mesh
- */
-bool libfive_tree_save_mesh(libfive_tree tree, libfive_region3 R,
-                            float res, const char* f);
-
-/*
- *  Renders a 2D slice of pixels at the given Z height
- *
- *  The returned struct must be freed with libfive_pixels_delete
- */
-libfive_pixels* libfive_tree_render_pixels(libfive_tree tree,
-                                           libfive_region2 R,
-                                           float z, float res);
+// /*
+//  *  Renders and saves a mesh to a file
+//  *
+//  *  Returns true on success, false otherwise
+//  *  See argument details in libfive_tree_render_mesh
+//  */
+// bool libfive_tree_save_mesh(libfive_tree tree, libfive_region3 R,
+//                             float res, const char* f);
 
 /*
  *  Returns the human-readable tag associated with this build,

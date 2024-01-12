@@ -17,8 +17,8 @@ License along with this library; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 */
 #include <algorithm>
-#include <fstream>
-#include <iostream>
+// #include <fstream>
+// #include <iostream>
 #include <set>
 #include <list>
 #include <cmath>
@@ -121,22 +121,22 @@ Tree Tree::deserialize(const std::vector<uint8_t>& data)
     return Template::deserialize(data).tree;
 }
 
-Tree Tree::load(const std::string& filename)
-{
-    std::ifstream in(filename, std::ios::in|std::ios::binary|std::ios::ate);
-    if (in.is_open())
-    {
-        std::vector<uint8_t> data;
-        data.resize(in.tellg());
+// Tree Tree::load(const std::string& filename)
+// {
+//     std::ifstream in(filename, std::ios::in|std::ios::binary|std::ios::ate);
+//     if (in.is_open())
+//     {
+//         std::vector<uint8_t> data;
+//         data.resize(in.tellg());
 
-        in.seekg(0, std::ios::beg);
-        in.read((char*)&data[0], data.size());
+//         in.seekg(0, std::ios::beg);
+//         in.read((char*)&data[0], data.size());
 
-        auto t = Template::deserialize(data);
-        return t.tree;
-    }
-    return Tree();
-}
+//         auto t = Template::deserialize(data);
+//         return t.tree;
+//     }
+//     return Tree();
+// }
 
 Tree Tree::remap(Tree X_, Tree Y_, Tree Z_) const
 {
@@ -167,57 +167,57 @@ Tree Tree::remap(std::map<Id, std::shared_ptr<Tree_>> m) const
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void Tree::Tree_::print(std::ostream& stream, Opcode::Opcode prev_op)
-{
-    const bool commutative = (prev_op == op);
-    const int args = Opcode::args(op);
+// void Tree::Tree_::print(std::ostream& stream, Opcode::Opcode prev_op)
+// {
+//     const bool commutative = (prev_op == op);
+//     const int args = Opcode::args(op);
 
-    if (!commutative)
-    {
-        switch (args)
-        {
-            case 2:
-            case 1: stream << "(" <<  Opcode::toOpString(op) << " ";
-                    break;
-            case 0:
-                if (op == Opcode::CONST)
-                {
-                    if (value == int(value))
-                    {
-                        stream << int(value);
-                    }
-                    else
-                    {
-                        stream << value;
-                    }
-                }
-                else
-                {
-                    stream << Opcode::toOpString(op);
-                }
-                break;
-            default:    assert(false);
-        }
-    }
+//     if (!commutative)
+//     {
+//         switch (args)
+//         {
+//             case 2:
+//             case 1: stream << "(" <<  Opcode::toOpString(op) << " ";
+//                     break;
+//             case 0:
+//                 if (op == Opcode::CONST)
+//                 {
+//                     if (value == int(value))
+//                     {
+//                         stream << int(value);
+//                     }
+//                     else
+//                     {
+//                         stream << value;
+//                     }
+//                 }
+//                 else
+//                 {
+//                     stream << Opcode::toOpString(op);
+//                 }
+//                 break;
+//             default:    assert(false);
+//         }
+//     }
 
-    const auto op_ = Opcode::isCommutative(op) ? op : Opcode::INVALID;
-    switch (args)
-    {
-        case 2:     lhs->print(stream, op_);
-                    stream << " ";
-                    rhs->print(stream, op_);
-                    break;
-        case 1:     lhs->print(stream, op_);
-                    break;
-        case 0:     break;
-        default:    assert(false);
-    }
+//     const auto op_ = Opcode::isCommutative(op) ? op : Opcode::INVALID;
+//     switch (args)
+//     {
+//         case 2:     lhs->print(stream, op_);
+//                     stream << " ";
+//                     rhs->print(stream, op_);
+//                     break;
+//         case 1:     lhs->print(stream, op_);
+//                     break;
+//         case 0:     break;
+//         default:    assert(false);
+//     }
 
-    if (!commutative && args > 0)
-    {
-        stream <<")";
-    }
-}
+//     if (!commutative && args > 0)
+//     {
+//         stream <<")";
+//     }
+// }
 
 }   // namespace Kernel
 
@@ -258,8 +258,8 @@ OP_BINARY(nanfill,      Kernel::Opcode::NANFILL)
 #undef OP_BINARY
 
 
-std::ostream& operator<<(std::ostream& stream, const Kernel::Tree& tree)
-{
-    tree->print(stream);
-    return stream;
-}
+// std::ostream& operator<<(std::ostream& stream, const Kernel::Tree& tree)
+// {
+//     tree->print(stream);
+//     return stream;
+// }

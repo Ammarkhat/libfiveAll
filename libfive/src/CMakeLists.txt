@@ -17,8 +17,6 @@ add_library(five SHARED
     eval/eval_point.cpp
     eval/tape.cpp
     eval/feature.cpp
-    render/discrete/heightmap.cpp
-    render/discrete/voxels.cpp
     render/brep/xtree2.cpp
     render/brep/xtree3.cpp
     render/brep/contours.cpp

@@ -16,7 +16,9 @@ You should have received a copy of the GNU Lesser General Public
 License along with this library; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 */
-#include <iostream>
+// #include <iostream>
+#include <stdio.h>
+
 #include <map>
 
 #include <boost/algorithm/string.hpp>
@@ -96,7 +98,8 @@ std::string Opcode::toString(Opcode op)
 
     if (op >= LAST_OP || op < 0)
     {
-        std::cerr << "Opcode::toString: Invalid opcode " << op << std::endl;
+        // std::cerr << "Opcode::toString: Invalid opcode " << op << std::endl;
+        printf("Opcode::toString: Invalid opcode\n");
         return "";
     }
     return opcode_names[op];
@@ -108,7 +111,9 @@ std::string Opcode::toScmString(Opcode op)
 
     if (op >= LAST_OP || op < 0)
     {
-        std::cerr << "Opcode::toString: Invalid opcode " << op << std::endl;
+        // std::cerr << "Opcode::toString: Invalid opcode " << op << std::endl;
+                printf("Opcode::toString: Invalid opcode\n");
+
         return "";
     }
 

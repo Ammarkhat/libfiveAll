@@ -16,7 +16,8 @@ You should have received a copy of the GNU Lesser General Public
 License along with this library; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 */
-#include <iostream>
+// #include <iostream>
+#include <stdio.h>
 
 #include "libfive/tree/template.hpp"
 
@@ -83,8 +84,7 @@ Template Template::deserialize(const std::vector<uint8_t>& data)
 #define REQUIRE(cond) \
     if (!(cond)) \
     { \
-        std::cerr << "Template::deserialize: expected " << #cond \
-                  << " at " << __LINE__ << std::endl; \
+        printf("Template::deserialize: expected "); \
         return out; \
     }
 #define CHECK_POS() REQUIRE(pos != end)
@@ -148,13 +148,11 @@ std::string Template::deserializeString(const uint8_t*& pos, const uint8_t* end)
     std::string out;
     if (pos == end)
     {
-        std::cerr << "Template::deserializeString: EOF at beginning of string"
-                  << std::endl;
+        printf("Template::deserializeString: EOF at beginning of string");
     }
     else if (*pos++ != '"')
     {
-        std::cerr << "Template::deserializeString: expected opening \""
-                  << std::endl;
+        printf("Template::deserializeString: expected opening");
     }
     else
     {
