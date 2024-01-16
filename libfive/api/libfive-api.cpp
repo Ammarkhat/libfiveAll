@@ -57,6 +57,10 @@ Tree offset(Tree a, float off) {
                              const auto y = Tree::Y(); (void)y; \
                              const auto z = Tree::Z(); (void)z; ;
 
+Tree move(Tree t, TreeVec3 offset) {
+    LIBFIVE_DEFINE_XYZ();
+    return t.remap(x - offset.x, y - offset.y, z - offset.z);
+}
 
 Tree move(Tree t, float cx, float cy, float cz) {
     LIBFIVE_DEFINE_XYZ();
@@ -66,6 +70,19 @@ Tree move(Tree t, float cx, float cy, float cz) {
 Tree sphere(float r, float cx, float cy, float cz) {
     LIBFIVE_DEFINE_XYZ();
     return move(sqrt(square(x) + square(y) + square(z)) - r, cx, cy, cz);
+}
+Tree torus_z(TreeFloat ro, TreeFloat ri, TreeVec3 center) {
+    LIBFIVE_DEFINE_XYZ();
+    return move(
+        sqrt(square(ro - sqrt(square(x) + square(y)))
+           + square(z)) - ri,
+        center);
+}
+
+Tree torus(float r, float cx, float cy) {
+    auto r0 = cx - r;
+    auto r1 = cx + r;
+    return torus_z(r0, r1, {0,cy,0});
 }
 
 Tree extrude_z(Tree t, TreeFloat zmin, TreeFloat zmax) {
@@ -166,6 +183,13 @@ int parseNode(Node* parentNode, vector<string> words, int i){
         node.data.push_back(stod(words[i+4]));
         parentNode->children.push_back(node);
         nextPosition = parseNode(parentNode, words, i+5);
+    }else if(word == "t"){
+        node.type = "torus";
+        node.data.push_back(stod(words[i+1]));
+        node.data.push_back(stod(words[i+2]));
+        node.data.push_back(stod(words[i+3]));
+        parentNode->children.push_back(node);
+        nextPosition = parseNode(parentNode, words, i+4);
     }else if(word == ")"){
         nextPosition = i + 1;
     }else{
@@ -215,6 +239,8 @@ Tree buildTree(Node& root) {
       return tr;
     } else if(root.type == "sphere"){
       return sphere(root.data[0], root.data[1], root.data[2], root.data[3]);
+    } else if(root.type == "torus"){
+      return torus(root.data[0], root.data[1], root.data[2]);
     }else if(root.children.size() > 0){
       return buildTree(root.children[0]);
     }
