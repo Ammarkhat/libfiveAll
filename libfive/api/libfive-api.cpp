@@ -37,6 +37,10 @@ struct TreeVec3 {
 };
 typedef Tree TreeFloat;
 
+#define LIBFIVE_DEFINE_XYZ() const auto x = Tree::X(); (void)x; \
+                             const auto y = Tree::Y(); (void)y; \
+                             const auto z = Tree::Z(); (void)z; ;
+
 Tree _union(Tree a, Tree b) {
     return min(a, b);
 }
@@ -53,9 +57,20 @@ Tree offset(Tree a, float off) {
     return a - off;
 }
 
-#define LIBFIVE_DEFINE_XYZ() const auto x = Tree::X(); (void)x; \
-                             const auto y = Tree::Y(); (void)y; \
-                             const auto z = Tree::Z(); (void)z; ;
+Tree scale_x(Tree t, TreeFloat sx, TreeFloat x0) {
+    LIBFIVE_DEFINE_XYZ();
+    return t.remap(x0 + (x - x0) / sx, y, z);
+}
+
+Tree scale_y(Tree t, TreeFloat sy, TreeFloat y0) {
+    LIBFIVE_DEFINE_XYZ();
+    return t.remap(x, y0 + (y - y0) / sy, z);
+}
+
+Tree scale_z(Tree t, TreeFloat sz, TreeFloat z0) {
+    LIBFIVE_DEFINE_XYZ();
+    return t.remap(x, y, z0 + (z - z0) / sz);
+}
 
 Tree move(Tree t, TreeVec3 offset) {
     LIBFIVE_DEFINE_XYZ();
@@ -154,6 +169,14 @@ Tree extrude_z(Tree t, TreeFloat zmin, TreeFloat zmax) {
     return max(t, max(zmin - z, z - zmax));
 }
 
+Tree revolve_y(Tree shape, TreeFloat x0) {
+    LIBFIVE_DEFINE_XYZ();
+    const auto r = sqrt(square(x) + square(z));
+    TreeVec3 center{-x0, 0, 0};
+    shape = move(shape, center);
+    return move(_union(shape.remap(r, y, z), shape.remap(-r, y, z)), center);
+}
+
 Tree rectangle(TreeVec2 a, TreeVec2 b) {
     LIBFIVE_DEFINE_XYZ();
     return max(
@@ -181,6 +204,14 @@ Tree blend_rough(Tree a, Tree b, TreeFloat m) {
 Tree half_plane(TreeVec2 a, TreeVec2 b) {
     LIBFIVE_DEFINE_XYZ();
     return (b.y - a.y) * (x - a.x) - (b.x - a.x) * (y - a.y);
+}
+
+Tree half_space(TreeVec3 norm, TreeVec3 point) {
+    LIBFIVE_DEFINE_XYZ();
+    // dot(pos - point, norm)
+    return (x - point.x) * norm.x +
+           (y - point.y) * norm.y +
+           (z - point.z) * norm.z;
 }
 
 Tree triangle(TreeVec2 a, TreeVec2 b, TreeVec2 c) {
@@ -287,10 +318,26 @@ int parseNode(Node* parentNode, vector<string> words, int i){
         if(nextPosition < words.size()-1){
             nextPosition = parseNode(parentNode, words, nextPosition);
         }
-      }else if(word == "rotate"){
-        node.type = "rotate";
+      }else if(word == "revolve"){
+        node.type = "revolve";
+        nextPosition = parseNode(&node, words, i+2);
+        parentNode->children.push_back(node);
+        if(nextPosition < words.size()-1){
+            nextPosition = parseNode(parentNode, words, nextPosition);
+        }
+      }else if(word == "rotate" || word == "scaleX" || word == "scaleY" || word == "scaleZ"){
+        node.type = word;
         node.data.push_back(stod(words[i+2]));
         nextPosition = parseNode(&node, words, i+3);
+        parentNode->children.push_back(node);
+        if(nextPosition < words.size()-1){
+            nextPosition = parseNode(parentNode, words, nextPosition);
+        }
+      }else if(word == "limit"){
+        node.type = "limit";
+        node.data.push_back(stod(words[i+2]));
+        node.data.push_back(stod(words[i+3]));
+        nextPosition = parseNode(&node, words, i+4);
         parentNode->children.push_back(node);
         if(nextPosition < words.size()-1){
             nextPosition = parseNode(parentNode, words, nextPosition);
@@ -385,9 +432,43 @@ Tree buildTree(Node& root) {
       Tree tr = buildTree(root.children[0]);
       tr = offset(tr, root.data[0]);
       return tr;
+    } else if(root.type == "limit"){
+      Tree tr = buildTree(root.children[0]);
+      auto view = root.data[0];
+      auto width = root.data[1];
+      if (view == 0 || view == 3) { // top
+        // y 
+        tr = intersection(tr, half_space({0,-1,0}, {0, -width/2, 0})); 
+        tr = intersection(tr, half_space({0,1,0}, {0, width/2, 0})); 
+      } else if (view == 1 || view == 4) { // front
+        // z
+        tr = intersection(tr, half_space({0,0,-1}, {0, 0, -width/2})); 
+        tr = intersection(tr, half_space({0,0,1}, {0, 0, width/2})); 
+      } else if (view == 2 || view == 5) { // left
+        // x
+        tr = intersection(tr, half_space({-1,0,0}, {-width/2,0,0})); 
+        tr = intersection(tr, half_space({1,0,0}, {width/2,0,0})); 
+      }
+      return tr;
+    } else if(root.type == "scaleX"){
+      Tree tr = buildTree(root.children[0]);
+      tr = scale_x(tr, root.data[0], 0);
+      return tr;
+    } else if(root.type == "scaleY"){
+      Tree tr = buildTree(root.children[0]);
+      tr = scale_y(tr, root.data[0], 0);
+      return tr;
+    } else if(root.type == "scaleZ"){
+      Tree tr = buildTree(root.children[0]);
+      tr = scale_z(tr, root.data[0], 0);
+      return tr;
     } else if(root.type == "extrude"){
       Tree tr = buildTree(root.children[0]);
       tr = extrude_z(tr, root.data[0], root.data[1]);
+      return tr;
+    } else if(root.type == "revolve"){
+      Tree tr = buildTree(root.children[0]);
+      tr = revolve_y(tr, 0);
       return tr;
     } else if(root.type == "rotate"){
       Tree tr = buildTree(root.children[0]);
