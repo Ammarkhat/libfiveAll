@@ -333,6 +333,16 @@ int parseNode(Node* parentNode, vector<string> words, int i){
         if(nextPosition < words.size()-1){
             nextPosition = parseNode(parentNode, words, nextPosition);
         }
+       }else if(word == "scale" || word == "rotation" || word == "position"){
+        node.type = word;
+        node.data.push_back(stod(words[i+2]));
+        node.data.push_back(stod(words[i+3]));
+        node.data.push_back(stod(words[i+4]));
+        nextPosition = parseNode(&node, words, i+5);
+        parentNode->children.push_back(node);
+        if(nextPosition < words.size()-1){
+            nextPosition = parseNode(parentNode, words, nextPosition);
+        }
       }else if(word == "limit"){
         node.type = "limit";
         node.data.push_back(stod(words[i+2]));
@@ -360,6 +370,14 @@ int parseNode(Node* parentNode, vector<string> words, int i){
         node.data.push_back(stod(words[i+4]));
         parentNode->children.push_back(node);
         nextPosition = parseNode(parentNode, words, i+5);
+    }else if(word == "sphere"){
+        node.type = "sphere";
+        node.data.push_back(stod(words[i+2]));
+        node.data.push_back(stod(words[i+3]));
+        node.data.push_back(stod(words[i+4]));
+        node.data.push_back(stod(words[i+5]));
+        parentNode->children.push_back(node);
+        nextPosition = parseNode(parentNode, words, i+6);
     }else if(word == "c"){
         node.type = "capsule";
         node.data.push_back(stod(words[i+1]));
@@ -498,6 +516,40 @@ Tree buildTree(Node& root) {
       return torus(root.data[0], root.data[1], root.data[2]);
     } else if(root.type == "triangle"){
       return triangle({root.data[0], root.data[1]}, {root.data[2], root.data[3]}, {root.data[4], root.data[5]});
+    } else if(root.type == "scale"){
+      Tree tr = buildTree(root.children[0]);
+      auto scale_x_value = root.data[0];
+      auto scale_y_value = root.data[1];
+      auto scale_z_value = root.data[2];
+      if(scale_x_value != 1){
+        tr = scale_x(tr, scale_x_value, 0);  
+      }
+      if(scale_y_value != 1){
+        tr = scale_y(tr, scale_y_value, 0);  
+      }
+      if(scale_z_value != 1){
+        tr = scale_z(tr, scale_z_value, 0);  
+      }
+      return tr;
+    } else if(root.type == "rotation"){
+      Tree tr = buildTree(root.children[0]);
+      auto rotation_x_value = root.data[0];
+      auto rotation_y_value = root.data[1];
+      auto rotation_z_value = root.data[2];
+      if(rotation_x_value != 0){
+        tr = rotate_x(tr, rotation_x_value, {0,0,0});  
+      }
+      if(rotation_y_value != 0){
+        tr = rotate_y(tr, rotation_y_value, {0,0,0});  
+      }
+      if(rotation_z_value != 0){
+        tr = rotate_z(tr, rotation_z_value, {0,0,0});  
+      }
+      return tr;
+    } else if(root.type == "position"){
+      Tree tr = buildTree(root.children[0]);
+      tr = move(tr, root.data[0], root.data[1], root.data[2]);  
+      return tr;
     } else if(root.children.size() > 0){
       return buildTree(root.children[0]);
     }
