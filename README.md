@@ -9,44 +9,7 @@
 
 (Tested on Mac OS X with dependencies installed via Homebrew.)
 
-Building:
-
- * Install dependencies with `brew install cmake pkg-config eigen boost`.
-
- * Install & enable `emsdk` as per <http://webassembly.org/getting-started/developers-guide/>.
-
- * Clone <https://github.com/Ammarkhat/libfiveAll/tree/add-web-assembly-support>.
-
- * At root of `libfive` repository:
-
-       mkdir build-wa
-       cd build-wa
-
-       emcmake cmake .. -DCMAKE_PREFIX_PATH=$(brew --prefix)
-       emmake make
-
-* if you encounter an error: "Please specify rounding control mechanism.", a simple workaround is to comment out that line.
-
- 
-* rename the output libfive.api.mjs to libfive.api.js
-
-* replace:
-            var _scriptDir = import.meta.url;
-      with 
-            var _scriptDir = null;
-
-* Usage: 
-       import createModule from './src/d3/volumetric/libfive-api.js';
-       createModule().then((wasmModule) => {
-            wasmModule.meshImplicitFunction();
-            const loader = new STLLoader();
-            const file_content = wasmModule.FS.readFile('/exported.stl');
-            const result_geometry = loader.parse(file_content.buffer);
-            store.dispatch(actions.loadGeoemtry(result_geometry));
-       });
-      
-
-
+Check add-web-assembly-support branch for my latest changes.
 
 ----
 
