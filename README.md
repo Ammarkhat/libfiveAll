@@ -13,7 +13,7 @@ Building:
 
  * Install dependencies with `brew install cmake pkg-config eigen boost`.
 
- * Install & enable `emsdk` as per <http://webassembly.org/getting-started/developers-guide/>.
+ * Install & enable `emsdk` as per https://emscripten.org/docs/getting_started/downloads.html
 
  * Use version 2.0.23-lto of the emsdk (not the latest as in the instructions above)
 
