@@ -574,14 +574,14 @@ struct MeshDto {
   unsigned int fpointer;
   unsigned int fsize;
 };
-MeshDto meshImplicitFunction(std::string implicitString, float resolution, float maxError) {
+MeshDto meshImplicitFunction(std::string implicitString, float resolution, float maxError, double minx, double miny, double minz, double maxx, double maxy, double maxz) {
 
   // std::cout << "Tree: " << libfive_tree_print(&out) << "\n";
   auto out_parse = parseImplicitString(implicitString);
   
   // The value for `max_err` is cargo-culted from its default value.
-  Region<3> bds({-150, -130, -150}, {150, 150, 150});
-  auto bds_box = box_mitered({-149, -129, -149}, {149, 149, 149});
+  Region<3> bds({minx, miny, minz}, {maxx, maxy, maxz});
+  auto bds_box = box_mitered({minx+1, miny+1, minz+1}, {maxx-1, maxy-1, maxz-1});
   auto out = intersection(bds_box, out_parse);
 
   //findBounds(out)

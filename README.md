@@ -24,8 +24,8 @@ Building:
        mkdir build
        cd build
 
-       emcmake cmake .. -DCMAKE_PREFIX_PATH=$(brew --prefix)
-       emmake make
+       sudo emcmake cmake .. -DCMAKE_PREFIX_PATH=$(brew --prefix)
+       sudo emmake make
 
 * if you encounter an error: "Please specify rounding control mechanism.", a simple workaround is to comment out that line.
 
@@ -38,7 +38,7 @@ Building:
 * Usage: 
        import createModule from './src/d3/volumetric/libfive-api.js';
        createModule().then((wasmModule) => {
-            wasmModule.meshImplicitFunction("implicit string", 0.5, 0.1);
+            wasmModule.meshImplicitFunction("implicit string", 0.5, 0.1, -150, -130, -150, 150, 150, 150);
        });
       
 
