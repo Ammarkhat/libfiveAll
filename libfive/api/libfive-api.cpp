@@ -72,6 +72,15 @@ Tree scale_z(Tree t, TreeFloat sz, TreeFloat z0) {
     return t.remap(x, y, z0 + (z - z0) / sz);
 }
 
+Tree clamp(Tree x, TreeFloat mn, TreeFloat mx){
+  return min(max(x, mn), mx);
+}
+
+Tree elongate(Tree t, TreeVec3 offset) {
+    LIBFIVE_DEFINE_XYZ();
+    return t.remap(x - clamp(x, -offset.x, offset.x), y - clamp(y, -offset.y, offset.y), z - clamp(z, -offset.z, offset.z));
+}
+
 Tree move(Tree t, TreeVec3 offset) {
     LIBFIVE_DEFINE_XYZ();
     return t.remap(x - offset.x, y - offset.y, z - offset.z);
@@ -448,7 +457,9 @@ Tree buildTree(Node& root) {
       return tr;
     } else if(root.type == "offset"){
       Tree tr = buildTree(root.children[0]);
-      tr = offset(tr, root.data[0]);
+      // tr = offset(tr, root.data[0]);
+      auto offs = root.data[0];
+      tr = elongate(tr, {offs, offs, offs});
       return tr;
     } else if(root.type == "limit"){
       Tree tr = buildTree(root.children[0]);
