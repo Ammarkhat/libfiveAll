@@ -517,7 +517,7 @@ Tree buildTree(Node& root) {
       return tr;
     } else if(root.type == "extend"){
       Tree tr = buildTree(root.children[0]);
-      // tr = offset(tr, root.data[0]);
+      tr = elongate(tr, {root.data[1], root.data[2], root.data[3]});
       return tr;
     } else if(root.type == "sphere"){
       return sphere(root.data[0], root.data[1], root.data[2], root.data[3]);
