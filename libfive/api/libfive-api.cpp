@@ -267,6 +267,34 @@ Tree reflect_xz(Tree t) {
 }
 
 
+Tree array_x(Tree shape, int nx, TreeFloat dx) {
+    auto out = shape;
+    for (int i=1; i < nx; ++i) {
+        out = _union(out, move(shape, {dx * i, 0, 0}));
+    }
+    return out;
+}
+
+Tree array_xy(Tree shape, int nx, int ny, TreeVec2 delta) {
+    shape = array_x(shape, nx, delta.x);
+    auto out = shape;
+    for (int i=1; i < ny; ++i) {
+        out = _union(out, move(shape, {0, delta.y * i, 0}));
+    }
+    return out;
+}
+
+Tree array_xyz(Tree shape, int nx, int ny, int nz,
+                         TreeVec3 delta) {
+    shape = array_xy(shape, nx, ny, {delta.x, delta.y});
+    auto out = shape;
+    for (int i=1; i < nz; ++i) {
+        out = _union(out, move(shape, {0, 0, delta.y * i}));
+    }
+    return out;
+}
+
+
 
 vector<string> splitBySpaces(string s)
 {
@@ -457,9 +485,9 @@ Tree buildTree(Node& root) {
       return tr;
     } else if(root.type == "offset"){
       Tree tr = buildTree(root.children[0]);
-      // tr = offset(tr, root.data[0]);
-      auto offs = root.data[0];
-      tr = elongate(tr, {offs, offs, offs});
+      tr = offset(tr, root.data[0]);
+      // auto offs = root.data[0];
+      // tr = elongate(tr, {offs, offs, offs});
       return tr;
     } else if(root.type == "limit"){
       Tree tr = buildTree(root.children[0]);
@@ -517,7 +545,35 @@ Tree buildTree(Node& root) {
       return tr;
     } else if(root.type == "extend"){
       Tree tr = buildTree(root.children[0]);
-      tr = elongate(tr, {root.data[1], root.data[2], root.data[3]});
+      // tr = elongate(tr, {root.data[1], root.data[2], root.data[3]});
+      float dx = 0;
+      float dy = 0;
+      float dz = 0;
+      int nx = 0;
+      int ny = 0;
+      int nz = 0;
+      if(root.data[1] > 0){
+        nx = 4;
+        dx = 1;
+      }else if(root.data[1] < 0){
+        nx = 4;
+        dx = -1;
+      }
+      if(root.data[2] > 0){
+        ny = 4;
+        dy = 1;
+      }else if(root.data[2] < 0){
+        ny = 4;
+        dy = -1;
+      }
+      if(root.data[3] > 0){
+        nz = 4;
+        dy = 1;
+      }else if(root.data[3] < 0){
+        nz = 4;
+        dy = -1;
+      }
+      tr = array_xyz(tr, nx, ny, nz, {dx, dy, dz});
       return tr;
     } else if(root.type == "sphere"){
       return sphere(root.data[0], root.data[1], root.data[2], root.data[3]);
