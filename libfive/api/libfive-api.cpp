@@ -91,6 +91,12 @@ Tree move(Tree t, float cx, float cy, float cz) {
     return t.remap(x - cx, y - cy, z - cz);
 }
 
+Tree circle(TreeFloat r, TreeVec2 center) {
+    LIBFIVE_DEFINE_XYZ();
+    auto c = sqrt(x * x + y * y) - r;
+    return move(c, {center.x, center.y, 0});
+}
+
 Tree rotate_x(Tree t, TreeFloat angle, TreeVec3 center) {
     LIBFIVE_DEFINE_XYZ();
     t = move(t, {-center.x, -center.y, -center.z});
@@ -118,6 +124,7 @@ Tree sphere(float r, float cx, float cy, float cz) {
     LIBFIVE_DEFINE_XYZ();
     return move(sqrt(square(x) + square(y) + square(z)) - r, cx, cy, cz);
 }
+
 Tree torus_z(TreeFloat ro, TreeFloat ri, TreeVec3 center) {
     LIBFIVE_DEFINE_XYZ();
     return move(
@@ -295,6 +302,15 @@ Tree array_xyz(Tree shape, int nx, int ny, int nz,
 }
 
 
+Tree cylinder_z(TreeFloat r, TreeFloat h, TreeVec3 base) {
+    return extrude_z(circle(r, {base.x, base.y}), base.z, base.z + h);
+}
+Tree cylinder_y(TreeFloat r, TreeFloat h, TreeVec3 base) {
+    return rotate_x(extrude_z(circle(r, {base.x, -base.z}), base.y, base.y + h), -M_PI/2, {0,0,0});
+}
+Tree cylinder_x(TreeFloat r, TreeFloat h, TreeVec3 base) {
+    return rotate_y(extrude_z(circle(r, {-base.z, base.y}), base.x, base.x + h), -M_PI/2, {0,0,0});
+}
 
 vector<string> splitBySpaces(string s)
 {
@@ -407,6 +423,17 @@ int parseNode(Node* parentNode, vector<string> words, int i){
         node.data.push_back(stod(words[i+4]));
         parentNode->children.push_back(node);
         nextPosition = parseNode(parentNode, words, i+5);
+    }else if(word == "c"){
+        node.type = "cylinder";
+        node.data.push_back(stod(words[i+1]));
+        node.data.push_back(stod(words[i+2]));
+        node.data.push_back(stod(words[i+3]));
+        node.data.push_back(stod(words[i+4]));
+        node.data.push_back(stod(words[i+5]));
+        node.data.push_back(stod(words[i+6]));
+        node.data.push_back(stod(words[i+7]));
+        parentNode->children.push_back(node);
+        nextPosition = parseNode(parentNode, words, i+8);
     }else if(word == "sphere"){
         node.type = "sphere";
         node.data.push_back(stod(words[i+2]));
@@ -577,6 +604,21 @@ Tree buildTree(Node& root) {
       return tr;
     } else if(root.type == "sphere"){
       return sphere(root.data[0], root.data[1], root.data[2], root.data[3]);
+    } else if(root.type == "cylinder"){
+      auto radius = root.data[0];
+      auto p1x = root.data[1];
+      auto p1y = root.data[2];
+      auto p1z = root.data[3];
+      auto p2x = root.data[4];
+      auto p2y = root.data[5];
+      auto p2z = root.data[6];
+      if(p1z != p2z){//along z
+        return cylinder_z(radius, abs(p1z-p2z), {p1x, p1y, min(p1z, p2z)});
+      }else if(p1y != p2y){
+        return cylinder_y(radius, abs(p1y-p2y), {p1x, min(p1y, p2y), p1z});
+      }else{
+        return cylinder_x(radius, abs(p1x-p2x), {min(p1x, p2x), p1y, p1z});
+      }
     } else if(root.type == "capsule"){
       return capsule(root.data[0], root.data[1], {root.data[2], root.data[3], root.data[4]}, {root.data[5], root.data[6], root.data[7]});
     } else if(root.type == "torus"){
