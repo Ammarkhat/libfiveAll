@@ -386,7 +386,7 @@ int parseNode(Node* parentNode, vector<string> words, int i){
         if(nextPosition < words.size()-1){
             nextPosition = parseNode(parentNode, words, nextPosition);
         }
-       }else if(word == "scale" || word == "rotation" || word == "position"){
+       }else if(word == "scale" || word == "position"){
         node.type = word;
         node.data.push_back(stod(words[i+2]));
         node.data.push_back(stod(words[i+3]));
@@ -396,11 +396,25 @@ int parseNode(Node* parentNode, vector<string> words, int i){
         if(nextPosition < words.size()-1){
             nextPosition = parseNode(parentNode, words, nextPosition);
         }
+      }else if(word == "rotation"){
+        node.type = word;
+        node.data.push_back(stod(words[i+2]));
+        node.data.push_back(stod(words[i+3]));
+        node.data.push_back(stod(words[i+4]));
+        node.data.push_back(stod(words[i+5]));
+        node.data.push_back(stod(words[i+6]));
+        node.data.push_back(stod(words[i+7]));
+        nextPosition = parseNode(&node, words, i+8);
+        parentNode->children.push_back(node);
+        if(nextPosition < words.size()-1){
+            nextPosition = parseNode(parentNode, words, nextPosition);
+        }
       }else if(word == "limit"){
         node.type = "limit";
         node.data.push_back(stod(words[i+2]));
         node.data.push_back(stod(words[i+3]));
-        nextPosition = parseNode(&node, words, i+4);
+        node.data.push_back(stod(words[i+4]));
+        nextPosition = parseNode(&node, words, i+5);
         parentNode->children.push_back(node);
         if(nextPosition < words.size()-1){
             nextPosition = parseNode(parentNode, words, nextPosition);
@@ -520,18 +534,19 @@ Tree buildTree(Node& root) {
       Tree tr = buildTree(root.children[0]);
       auto view = root.data[0];
       auto width = root.data[1];
+      auto thirdDimension = root.data[2];
       if (view == 0 || view == 3) { // top
         // y 
-        tr = intersection(tr, half_space({0,-1,0}, {0, -width/2, 0})); 
-        tr = intersection(tr, half_space({0,1,0}, {0, width/2, 0})); 
+        tr = intersection(tr, half_space({0,-1,0}, {0, thirdDimension -width/2, 0})); 
+        tr = intersection(tr, half_space({0,1,0}, {0, thirdDimension +width/2, 0})); 
       } else if (view == 1 || view == 4) { // front
         // z
-        tr = intersection(tr, half_space({0,0,-1}, {0, 0, -width/2})); 
-        tr = intersection(tr, half_space({0,0,1}, {0, 0, width/2})); 
+        tr = intersection(tr, half_space({0,0,-1}, {0, 0, thirdDimension -width/2})); 
+        tr = intersection(tr, half_space({0,0,1}, {0, 0, thirdDimension +width/2})); 
       } else if (view == 2 || view == 5) { // left
         // x
-        tr = intersection(tr, half_space({-1,0,0}, {-width/2,0,0})); 
-        tr = intersection(tr, half_space({1,0,0}, {width/2,0,0})); 
+        tr = intersection(tr, half_space({-1,0,0}, {thirdDimension-width/2,0,0})); 
+        tr = intersection(tr, half_space({1,0,0}, {thirdDimension+width/2,0,0})); 
       }
       return tr;
     } else if(root.type == "scaleX"){
@@ -645,14 +660,18 @@ Tree buildTree(Node& root) {
       auto rotation_x_value = root.data[0];
       auto rotation_y_value = root.data[1];
       auto rotation_z_value = root.data[2];
+
+      auto center_x = root.data[3];
+      auto center_y = root.data[4];
+      auto center_z = root.data[5];
       if(rotation_x_value != 0){
-        tr = rotate_x(tr, rotation_x_value, {0,0,0});  
+        tr = rotate_x(tr, rotation_x_value, {center_x,center_y,center_z});  
       }
       if(rotation_y_value != 0){
-        tr = rotate_y(tr, rotation_y_value, {0,0,0});  
+        tr = rotate_y(tr, rotation_y_value, {center_x,center_y,center_z});  
       }
       if(rotation_z_value != 0){
-        tr = rotate_z(tr, rotation_z_value, {0,0,0});  
+        tr = rotate_z(tr, rotation_z_value, {center_x,center_y,center_z});  
       }
       return tr;
     } else if(root.type == "position"){
