@@ -110,6 +110,9 @@ void JacobianEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
             case Opcode::NANFILL:
                 oj = std::isnan(av) ? bj : aj;
                 break;
+            case Opcode::COMPARE:
+                oj.setZero();
+                break;
 
             case Opcode::SQUARE:
                 oj = 2 * av * aj;
@@ -153,6 +156,10 @@ void JacobianEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
                 break;
 
             case Opcode::CONST_VAR:
+                oj.setZero();
+                break;
+
+            case Opcode::ORACLE:
                 oj.setZero();
                 break;
 

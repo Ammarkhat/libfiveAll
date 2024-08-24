@@ -36,6 +36,7 @@ size_t Opcode::args(Opcode op)
         case VAR_Y:
         case VAR_Z:
         case VAR:
+        case ORACLE:
             return 0;
 
         case SQUARE: // fallthrough
@@ -65,6 +66,7 @@ size_t Opcode::args(Opcode op)
         case NTH_ROOT:
         case MOD:
         case NANFILL:
+        case COMPARE:
             return 2;
 
         case INVALID: // fallthrough
@@ -150,8 +152,8 @@ std::string Opcode::toOpString(Opcode op)
         case VAR_Y: return "y";
         case VAR_Z: return "z";
 
-        case VAR:
-        case SQUARE: // fallthrough
+        case VAR: // fallthrough
+        case SQUARE:
         case SQRT:
         case SIN:
         case COS:
@@ -168,6 +170,7 @@ std::string Opcode::toOpString(Opcode op)
         case NTH_ROOT:
         case MOD:
         case NANFILL:
+        case COMPARE:
         case LOG:
         case ABS:
             return toScmString(op);
@@ -182,6 +185,7 @@ std::string Opcode::toOpString(Opcode op)
 
         case INVALID: // fallthrough
         case CONST:
+        case ORACLE:
         case LAST_OP: return "";
     }
     assert(false);
@@ -197,6 +201,7 @@ bool Opcode::isCommutative(Opcode op)
         case VAR_Y:
         case VAR_Z:
         case VAR:
+        case ORACLE:
         case SQUARE:
         case SQRT:
         case NEG:
@@ -214,6 +219,7 @@ bool Opcode::isCommutative(Opcode op)
         case NTH_ROOT:
         case MOD:
         case NANFILL:
+        case COMPARE:
         case INVALID:
         case LOG:
         case ABS:

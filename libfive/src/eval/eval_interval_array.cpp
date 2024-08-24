@@ -16,108 +16,136 @@ You should have received a copy of the GNU Lesser General Public
 License along with this library; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 */
-#include "libfive/eval/eval_interval.hpp"
+#include "libfive/eval/eval_interval_array.hpp"
+#include "libfive/render/axes.hpp"
 
 namespace Kernel {
 
-IntervalEvaluator::IntervalEvaluator(std::shared_ptr<Tape> t)
-    : IntervalEvaluator(t, std::map<Tree::Id, float>())
+constexpr size_t IntervalArrayEvaluator::N;
+
+IntervalArrayEvaluator::IntervalArrayEvaluator(std::shared_ptr<Tape> t)
+    : IntervalArrayEvaluator(t, std::map<Tree::Id, float>())
 {
     // Nothing to do here
 }
 
-IntervalEvaluator::IntervalEvaluator(
+IntervalArrayEvaluator::IntervalArrayEvaluator(
         std::shared_ptr<Tape> t, const std::map<Tree::Id, float>& vars)
-    : BaseEvaluator(t, vars)
+    : BaseEvaluator(t, vars), i(tape->num_clauses + 1, N)
 {
-    i.resize(tape->num_clauses + 1);
-
     // Unpack variables into result array
     for (auto& v : t->vars.right)
     {
         auto var = vars.find(v.first);
-        i[v.second] = (var != vars.end()) ? var->second : 0;
+        i.row(v.second) = (var != vars.end())
+            ? Interval::I(var->second, var->second)
+            : Interval::I(0, 0);
     }
 
     // Unpack constants into result array
     for (auto& c : tape->constants)
     {
-        i[c.first] = c.second;
+        i.row(c.first) = Interval::I(c.second, c.second);
     }
 }
 
-Interval::I IntervalEvaluator::eval(const Eigen::Vector3f& lower,
-                                    const Eigen::Vector3f& upper)
+Interval::I IntervalArrayEvaluator::eval(const Eigen::Vector3f& lower,
+                                         const Eigen::Vector3f& upper)
 {
-    i[tape->X] = {lower.x(), upper.x()};
-    i[tape->Y] = {lower.y(), upper.y()};
-    i[tape->Z] = {lower.z(), upper.z()};
-
-    for (auto& o : tape->oracles)
+    // Split the root interval into eight sub-intervals
+    // TODO: Only split as many as is necessary (e.g. into 4 in the 2D case)
+    const Eigen::Vector3f center = (lower + upper) / 2;
+    for (unsigned j=0; j < N; ++j)
     {
-        o->set(lower, upper);
+        i(tape->X, j) = (j & Axis::X) ? Interval::I(center.x(), upper.x())
+                                      : Interval::I(lower.x(),  center.x());
+        i(tape->Y, j) = (j & Axis::Y) ? Interval::I(center.y(), upper.y())
+                                      : Interval::I(lower.y(),  center.y());
+        i(tape->Z, j) = (j & Axis::Z) ? Interval::I(center.z(), upper.z())
+                                      : Interval::I(lower.z(),  center.z());
     }
 
-    return i[tape->rwalk(*this)];
+    auto index = tape->rwalk(*this);
+    Interval::I out(std::numeric_limits<float>::infinity(),
+                   -std::numeric_limits<float>::infinity());
+
+    // Find the union of all of the intervals
+    for (unsigned j=0; j < N; ++j)
+    {
+        out = {fmin(out.lower(), i(index, j).lower()),
+               fmax(out.upper(), i(index, j).upper())};
+    }
+    return out;
 }
 
-Interval::I IntervalEvaluator::evalAndPush(const Eigen::Vector3f& lower,
-                                           const Eigen::Vector3f& upper)
+Interval::I IntervalArrayEvaluator::evalAndPush(const Eigen::Vector3f& lower,
+                                                const Eigen::Vector3f& upper)
 {
     auto out = eval(lower, upper);
-
     tape->push([&](Opcode::Opcode op, Clause::Id /* id */,
                   Clause::Id a, Clause::Id b)
     {
-        // For min and max operations, we may only need to keep one branch
+        uint8_t result = 0;
+        const uint8_t KEEP_A = 1;
+        const uint8_t KEEP_B = 2;
+
         // active if it is decisively above or below the other branch.
         if (op == Opcode::MAX)
         {
-            if (i[a].lower() > i[b].upper())
+            for (unsigned j=0; j < N && result != (KEEP_A | KEEP_B); ++j)
             {
-                return Tape::KEEP_A;
-            }
-            else if (i[b].lower() > i[a].upper())
-            {
-                return Tape::KEEP_B;
-            }
-            else
-            {
-                return Tape::KEEP_BOTH;
+                if (i(a, j).lower() > i(b, j).upper())
+                {
+                    result |= KEEP_A;
+                }
+                else if (i(b, j).lower() > i(a, j).upper())
+                {
+                    result |= KEEP_B;
+                }
+                else
+                {
+                    result |= KEEP_A | KEEP_B;
+                }
             }
         }
         else if (op == Opcode::MIN)
         {
-            if (i[a].lower() > i[b].upper())
+            for (unsigned j=0; j < N && result != (KEEP_A | KEEP_B); ++j)
             {
-                return Tape::KEEP_B;
-            }
-            else if (i[b].lower() > i[a].upper())
-            {
-                return Tape::KEEP_A;
-            }
-            else
-            {
-                return Tape::KEEP_BOTH;
+                if (i(a, j).lower() > i(b, j).upper())
+                {
+                    result |= KEEP_B;
+                }
+                else if (i(b, j).lower() > i(a, j).upper())
+                {
+                    result |= KEEP_A;
+                }
+                else
+                {
+                    result |= KEEP_A | KEEP_B;
+                }
             }
         }
-        return Tape::KEEP_ALWAYS;
-    },
-        Tape::INTERVAL,
-        {{i[tape->X].lower(), i[tape->Y].lower(), i[tape->Z].lower()},
-         {i[tape->X].upper(), i[tape->Y].upper(), i[tape->Z].upper()}});
+        switch (result)
+        {
+            case 0:         return Tape::KEEP_ALWAYS;
+            case KEEP_A:    return Tape::KEEP_A;
+            case KEEP_B:    return Tape::KEEP_B;
+            default:        return Tape::KEEP_BOTH;
+        }
+    }, Tape::SPECIALIZED);
     return out;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-bool IntervalEvaluator::setVar(Tree::Id var, float value)
+bool IntervalArrayEvaluator::setVar(Tree::Id var, float value)
 {
     auto v = tape->vars.right.find(var);
     if (v != tape->vars.right.end())
     {
-        bool changed = i[v->second] != value;
-        i[v->second] = value;
+        bool changed = i(v->second, 0) != value;
+        i.row(v->second) = value;
         return changed;
     }
     else
@@ -128,74 +156,98 @@ bool IntervalEvaluator::setVar(Tree::Id var, float value)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void IntervalEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
-                                   Clause::Id a_, Clause::Id b_)
+void IntervalArrayEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
+                                        Clause::Id a, Clause::Id b)
 {
-#define out i[id]
-#define a i[a_]
-#define b i[b_]
-    switch (op) {
+// TODO: Figure out how to make Eigen parallelize these
+#define out i(id, j)
+#define a i(a, j)
+#define b i(b, j)
+#define EVAL_LOOP for (unsigned j=0; j < N; ++j)
+    switch (op)
+    {
         case Opcode::ADD:
+            EVAL_LOOP
             out = a + b;
             break;
         case Opcode::MUL:
+            EVAL_LOOP
             out = a * b;
             break;
         case Opcode::MIN:
+            EVAL_LOOP
             out = boost::numeric::min(a, b);
             break;
         case Opcode::MAX:
+            EVAL_LOOP
             out = boost::numeric::max(a, b);
             break;
         case Opcode::SUB:
+            EVAL_LOOP
             out = a - b;
             break;
         case Opcode::DIV:
+            EVAL_LOOP
             out = a / b;
             break;
         case Opcode::ATAN2:
+            EVAL_LOOP
             out = atan2(a, b);
             break;
         case Opcode::POW:
+            EVAL_LOOP
             out = boost::numeric::pow(a, b.lower());
             break;
         case Opcode::NTH_ROOT:
+            EVAL_LOOP
             out = boost::numeric::nth_root(a, b.lower());
             break;
         case Opcode::MOD:
+            EVAL_LOOP
             out = Interval::I(0.0f, b.upper()); // YOLO
             break;
         case Opcode::NANFILL:
+            EVAL_LOOP
             out = (std::isnan(a.lower()) || std::isnan(a.upper())) ? b : a;
             break;
         case Opcode::COMPARE:
+            EVAL_LOOP {
             if      (a.upper() < b.lower()) out = Interval::I(-1, -1);
             else if (a.lower() > b.upper()) out = Interval::I( 1,  1);
             else                            out = Interval::I(-1,  1);
+            }
             break;
 
         case Opcode::SQUARE:
+            EVAL_LOOP
             out = boost::numeric::square(a);
             break;
         case Opcode::SQRT:
+            EVAL_LOOP
             out = boost::numeric::sqrt(a);
             break;
         case Opcode::NEG:
+            EVAL_LOOP
             out = -a;
             break;
         case Opcode::SIN:
+            EVAL_LOOP
             out = boost::numeric::sin(a);
             break;
         case Opcode::COS:
+            EVAL_LOOP
             out = boost::numeric::cos(a);
             break;
         case Opcode::TAN:
+            EVAL_LOOP
             out = boost::numeric::tan(a);
             break;
         case Opcode::ASIN:
+            EVAL_LOOP
             out = boost::numeric::asin(a);
             break;
         case Opcode::ACOS:
+            EVAL_LOOP
             out = boost::numeric::acos(a);
             break;
         case Opcode::ATAN:
@@ -204,31 +256,34 @@ void IntervalEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
             // situations where we do atan(y / x) and the behavior of the
             // interval changes if you're approaching x = 0 from below versus
             // from above.
+            EVAL_LOOP
             out = (std::isinf(a.lower()) || std::isinf(a.upper()))
                 ? Interval::I(-M_PI/2, M_PI/2)
                 : boost::numeric::atan(a);
             break;
         case Opcode::EXP:
+            EVAL_LOOP
             out = boost::numeric::exp(a);
             break;
         case Opcode::LOG:
+            EVAL_LOOP
             out = boost::numeric::log(a);
             break;
         case Opcode::ABS:
+            EVAL_LOOP
             out = boost::numeric::abs(a);
             break;
         case Opcode::RECIP:
+            EVAL_LOOP
             out = Interval::I(1,1) / a;
             break;
 
         case Opcode::CONST_VAR:
+            EVAL_LOOP
             out = a;
             break;
 
-        case Opcode::ORACLE:
-            tape->oracles[a_]->evalInterval(out);
-            break;
-
+        case Opcode::ORACLE: // TODO
         case Opcode::INVALID:
         case Opcode::CONST:
         case Opcode::VAR_X:
@@ -243,3 +298,4 @@ void IntervalEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
 }
 
 }   // namespace Kernel
+

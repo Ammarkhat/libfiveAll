@@ -35,6 +35,21 @@ Tree::Tree()
     // Nothing to do here
 }
 
+Tree::Tree(std::unique_ptr<const OracleClause> o)
+    : ptr(std::shared_ptr<Tree_>(new Tree_{
+        Opcode::ORACLE,
+        0, // flags
+        0, // rank
+        std::nanf(""), // value
+        std::move(o), // oracle
+        nullptr,
+        nullptr }))
+{
+    // Nothing to do here either.  ptr is constructed directly (without using
+    // the cache), since using  a unique_ptr to the oracle already precludes
+    // duplication.
+}
+
 Tree::Tree(float v)
     : ptr(Cache::instance()->constant(v))
 {
@@ -74,7 +89,7 @@ Tree::Tree_::~Tree_()
     {
         Cache::instance()->del(value);
     }
-    else if (op != Opcode::VAR)
+    else if (op != Opcode::VAR && op != Opcode::ORACLE)
     {
         Cache::instance()->del(op, lhs, rhs);
     }
@@ -255,6 +270,7 @@ OP_BINARY(pow,          Kernel::Opcode::POW)
 OP_BINARY(nth_root,     Kernel::Opcode::NTH_ROOT)
 OP_BINARY(mod,          Kernel::Opcode::MOD)
 OP_BINARY(nanfill,      Kernel::Opcode::NANFILL)
+OP_BINARY(compare,      Kernel::Opcode::COMPARE)
 #undef OP_BINARY
 
 
