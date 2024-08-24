@@ -1,20 +1,11 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
+
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #pragma once
 
@@ -31,39 +22,40 @@ namespace Opcode
 #define OPCODES \
     OPCODE(INVALID, 0)      \
                             \
-    OPCODE(CONST, 1)        \
+    OPCODE(CONSTANT, 1)     \
     OPCODE(VAR_X, 2)        \
     OPCODE(VAR_Y, 3)        \
     OPCODE(VAR_Z, 4)        \
-    OPCODE(VAR, 5)          \
+    OPCODE(VAR_FREE, 5)     \
     OPCODE(CONST_VAR, 6)    \
                             \
-    OPCODE(SQUARE, 7)       \
-    OPCODE(SQRT, 8)         \
-    OPCODE(NEG, 9)          \
-    OPCODE(SIN, 10)         \
-    OPCODE(COS, 11)         \
-    OPCODE(TAN, 12)         \
-    OPCODE(ASIN, 13)        \
-    OPCODE(ACOS, 14)        \
-    OPCODE(ATAN, 15)        \
-    OPCODE(EXP, 16)         \
-    OPCODE(ABS, 28)         \
-    OPCODE(LOG, 30)         \
-    OPCODE(RECIP, 29)       \
+    OPCODE(OP_SQUARE, 7)    \
+    OPCODE(OP_SQRT, 8)      \
+    OPCODE(OP_NEG, 9)       \
+    OPCODE(OP_SIN, 10)      \
+    OPCODE(OP_COS, 11)      \
+    OPCODE(OP_TAN, 12)      \
+    OPCODE(OP_ASIN, 13)     \
+    OPCODE(OP_ACOS, 14)     \
+    OPCODE(OP_ATAN, 15)     \
+    OPCODE(OP_EXP, 16)      \
+    OPCODE(OP_ABS, 28)      \
+    OPCODE(OP_LOG, 30)      \
+    OPCODE(OP_RECIP, 29)    \
                             \
-    OPCODE(ADD, 17)         \
-    OPCODE(MUL, 18)         \
-    OPCODE(MIN, 19)         \
-    OPCODE(MAX, 20)         \
-    OPCODE(SUB, 21)         \
-    OPCODE(DIV, 22)         \
-    OPCODE(ATAN2, 23)       \
-    OPCODE(POW, 24)         \
-    OPCODE(NTH_ROOT, 25)    \
-    OPCODE(MOD, 26)         \
-    OPCODE(NANFILL, 27)     \
-    OPCODE(COMPARE, 31)     \
+    OPCODE(OP_ADD, 17)      \
+    OPCODE(OP_MUL, 18)      \
+    OPCODE(OP_MIN, 19)      \
+    OPCODE(OP_MAX, 20)      \
+    OPCODE(OP_SUB, 21)      \
+    OPCODE(OP_DIV, 22)      \
+    OPCODE(OP_ATAN2, 23)    \
+    OPCODE(OP_POW, 24)      \
+    OPCODE(OP_NTH_ROOT, 25) \
+    OPCODE(OP_MOD, 26)      \
+    OPCODE(OP_NANFILL, 27)  \
+    OPCODE(OP_COMPARE, 31)  \
+                            \
     OPCODE(ORACLE, 32)      \
 
 enum Opcode {

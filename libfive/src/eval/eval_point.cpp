@@ -1,46 +1,52 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
+
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #include <boost/numeric/interval.hpp>
 
 #include "libfive/eval/eval_point.hpp"
+#include "libfive/eval/deck.hpp"
+#include "libfive/eval/tape.hpp"
 
 namespace Kernel {
 
-PointEvaluator::PointEvaluator(std::shared_ptr<Tape> t)
-    : PointEvaluator(t, std::map<Tree::Id, float>())
+PointEvaluator::PointEvaluator(const Tree& root)
+    : PointEvaluator(std::make_shared<Deck>(root))
 {
     // Nothing to do here
 }
 
 PointEvaluator::PointEvaluator(
-        std::shared_ptr<Tape> t, const std::map<Tree::Id, float>& vars)
-    : BaseEvaluator(t, vars), f(tape->num_clauses + 1, 1)
+        const Tree& root, const std::map<Tree::Id, float>& vars)
+    : PointEvaluator(std::make_shared<Deck>(root), vars)
+{
+    // Nothing to do here
+}
+
+PointEvaluator::PointEvaluator(std::shared_ptr<Deck> d)
+    : PointEvaluator(d, std::map<Tree::Id, float>())
+{
+    // Nothing to do here
+}
+
+PointEvaluator::PointEvaluator(
+        std::shared_ptr<Deck> d, const std::map<Tree::Id, float>& vars)
+    : BaseEvaluator(d, vars), f(d->num_clauses + 1, 1)
 {
     // Unpack variables into result array
-    for (auto& v : t->vars.right)
+    for (auto& v : d->vars.right)
     {
         auto var = vars.find(v.first);
         f(v.second) = (var != vars.end()) ? var->second : 0;
     }
 
     // Unpack constants into result array
-    for (auto& c : tape->constants)
+    for (auto& c : deck->constants)
     {
         f(c.first) = c.second;
     }
@@ -48,27 +54,47 @@ PointEvaluator::PointEvaluator(
 
 float PointEvaluator::eval(const Eigen::Vector3f& pt)
 {
-    f(tape->X) = pt.x();
-    f(tape->Y) = pt.y();
-    f(tape->Z) = pt.z();
+    return eval(pt, deck->tape);
+}
 
-    for (auto& o : tape->oracles)
+float PointEvaluator::eval(const Eigen::Vector3f& pt,
+                           std::shared_ptr<Tape> tape)
+{
+    assert(tape.get());
+
+    f(deck->X) = pt.x();
+    f(deck->Y) = pt.y();
+    f(deck->Z) = pt.z();
+
+    for (auto& o : deck->oracles)
     {
         o->set(pt);
     }
 
-    return f(tape->rwalk(*this));
+    deck->bindOracles(tape);
+    auto index = tape->rwalk(*this);
+    deck->unbindOracles();
+
+    return f(index);
 }
 
-float PointEvaluator::evalAndPush(const Eigen::Vector3f& pt)
+std::pair<float, Tape::Handle> PointEvaluator::evalAndPush(
+        const Eigen::Vector3f& pt)
 {
-    auto out = eval(pt);
-    tape->push([&](Opcode::Opcode op, Clause::Id /* id */,
-                  Clause::Id a, Clause::Id b)
+    return evalAndPush(pt, deck->tape);
+}
+
+std::pair<float, Tape::Handle> PointEvaluator::evalAndPush(
+        const Eigen::Vector3f& pt, Tape::Handle tape)
+{
+    auto out = eval(pt, tape);
+    auto p = Tape::push(tape, *deck,
+        [&](Opcode::Opcode op, Clause::Id /* id */,
+            Clause::Id a, Clause::Id b)
     {
         // For min and max operations, we may only need to keep one branch
         // active if it is decisively above or below the other branch.
-        if (op == Opcode::MAX)
+        if (op == Opcode::OP_MAX)
         {
             if (f(a) > f(b))
             {
@@ -83,7 +109,7 @@ float PointEvaluator::evalAndPush(const Eigen::Vector3f& pt)
                 return Tape::KEEP_BOTH;
             }
         }
-        else if (op == Opcode::MIN)
+        else if (op == Opcode::OP_MIN)
         {
             if (f(a) > f(b))
             {
@@ -100,20 +126,15 @@ float PointEvaluator::evalAndPush(const Eigen::Vector3f& pt)
         }
         return Tape::KEEP_ALWAYS;
     }, Tape::SPECIALIZED);
-    return out;
-}
-
-float PointEvaluator::baseEval(const Eigen::Vector3f& pt)
-{
-    return tape->baseEval<PointEvaluator, float>(*this, pt);
+    return std::make_pair(out, std::move(p));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 bool PointEvaluator::setVar(Tree::Id var, float value)
 {
-    auto v = tape->vars.right.find(var);
-    if (v != tape->vars.right.end())
+    auto v = deck->vars.right.find(var);
+    if (v != deck->vars.right.end())
     {
         bool changed = f(v->second) != value;
         f.row(v->second) = value;
@@ -135,31 +156,31 @@ void PointEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
 #define b f(b_)
     switch (op)
     {
-        case Opcode::ADD:
+        case Opcode::OP_ADD:
             out = a + b;
             break;
-        case Opcode::MUL:
+        case Opcode::OP_MUL:
             out = a * b;
             break;
-        case Opcode::MIN:
+        case Opcode::OP_MIN:
             out = fmin(a, b);
             break;
-        case Opcode::MAX:
+        case Opcode::OP_MAX:
             out = fmax(a, b);
             break;
-        case Opcode::SUB:
+        case Opcode::OP_SUB:
             out = a - b;
             break;
-        case Opcode::DIV:
+        case Opcode::OP_DIV:
             out = a / b;
             break;
-        case Opcode::ATAN2:
+        case Opcode::OP_ATAN2:
             out = atan2(a, b);
             break;
-        case Opcode::POW:
+        case Opcode::OP_POW:
             out = pow(a, b);
             break;
-        case Opcode::NTH_ROOT:
+        case Opcode::OP_NTH_ROOT:
             // Work around a limitation in pow by using boost's nth-root
             // function on a single-point interval
             if (a < 0)
@@ -167,59 +188,59 @@ void PointEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
             else
                 out = pow(a, 1.0f/b);
             break;
-        case Opcode::MOD:
+        case Opcode::OP_MOD:
             out = std::fmod(a, b);
             while (out < 0)
             {
                 out += b;
             }
             break;
-        case Opcode::NANFILL:
+        case Opcode::OP_NANFILL:
             out = std::isnan(a) ? b : a;
             break;
-        case Opcode::COMPARE:
+        case Opcode::OP_COMPARE:
             if      (a < b)     out = -1;
             else if (a > b)     out =  1;
             else                out =  0;
             break;
 
-        case Opcode::SQUARE:
+        case Opcode::OP_SQUARE:
             out = a * a;
             break;
-        case Opcode::SQRT:
+        case Opcode::OP_SQRT:
             out = sqrt(a);
             break;
-        case Opcode::NEG:
+        case Opcode::OP_NEG:
             out = -a;
             break;
-        case Opcode::SIN:
+        case Opcode::OP_SIN:
             out = sin(a);
             break;
-        case Opcode::COS:
+        case Opcode::OP_COS:
             out = cos(a);
             break;
-        case Opcode::TAN:
+        case Opcode::OP_TAN:
             out = tan(a);
             break;
-        case Opcode::ASIN:
+        case Opcode::OP_ASIN:
             out = asin(a);
             break;
-        case Opcode::ACOS:
+        case Opcode::OP_ACOS:
             out = acos(a);
             break;
-        case Opcode::ATAN:
+        case Opcode::OP_ATAN:
             out = atan(a);
             break;
-        case Opcode::LOG:
+        case Opcode::OP_LOG:
             out = log(a);
             break;
-        case Opcode::EXP:
+        case Opcode::OP_EXP:
             out = exp(a);
             break;
-        case Opcode::ABS:
+        case Opcode::OP_ABS:
             out = fabs(a);
             break;
-        case Opcode::RECIP:
+        case Opcode::OP_RECIP:
             out = 1 / a;
             break;
 
@@ -228,15 +249,15 @@ void PointEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
             break;
 
         case Opcode::ORACLE:
-            tape->oracles[a_]->evalPoint(out);
+            deck->oracles[a_]->evalPoint(out);
             break;
 
         case Opcode::INVALID:
-        case Opcode::CONST:
+        case Opcode::CONSTANT:
         case Opcode::VAR_X:
         case Opcode::VAR_Y:
         case Opcode::VAR_Z:
-        case Opcode::VAR:
+        case Opcode::VAR_FREE:
         case Opcode::LAST_OP: assert(false);
     }
 #undef out
@@ -245,5 +266,3 @@ void PointEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
 }
 
 }   // namespace Kernel
-
-

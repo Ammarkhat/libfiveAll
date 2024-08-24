@@ -2,25 +2,16 @@
 libfive: a CAD kernel for modeling with implicit functions
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #pragma once
 
 #include <Eigen/Eigen>
 
 #include "libfive/eval/base.hpp"
+#include "libfive/eval/deck.hpp"
 #include "libfive/eval/eval_array_size.hpp"
 
 namespace Kernel {
@@ -28,15 +19,12 @@ namespace Kernel {
 class ArrayEvaluator : public BaseEvaluator
 {
 public:
-    ArrayEvaluator(std::shared_ptr<Tape> t);
-    ArrayEvaluator(std::shared_ptr<Tape> t,
+    ArrayEvaluator(const Tree& root);
+    ArrayEvaluator(const Tree& root,
                    const std::map<Tree::Id, float>& vars);
-
-    /*
-     *  Single-point evaluation
-     */
-    float eval(const Eigen::Vector3f& pt);
-    float evalAndPush(const Eigen::Vector3f& pt);
+    ArrayEvaluator(std::shared_ptr<Deck> t);
+    ArrayEvaluator(std::shared_ptr<Deck> t,
+                   const std::map<Tree::Id, float>& vars);
 
     /*
      *  Stores the given value in the result arrays
@@ -44,14 +32,23 @@ public:
      */
     void set(const Eigen::Vector3f& p, size_t index)
     {
-        f(tape->X, index) = p.x();
-        f(tape->Y, index) = p.y();
-        f(tape->Z, index) = p.z();
+        f(deck->X, index) = p.x();
+        f(deck->Y, index) = p.y();
+        f(deck->Z, index) = p.z();
 
-        for (auto& o : tape->oracles)
+        for (auto& o : deck->oracles)
         {
             o->set(p, index);
         }
+    }
+
+    /*
+     *  Reads a position from the results arrays
+     */
+    Eigen::Vector3f get(size_t index) const {
+        return Eigen::Vector3f(f(deck->X, index),
+                               f(deck->Y, index),
+                               f(deck->Z, index));
     }
 
     /*  This is the number of samples that we can process in one pass */
@@ -73,11 +70,21 @@ protected:
      */
     void operator()(Opcode::Opcode op, Clause::Id id,
                     Clause::Id a, Clause::Id b);
+
+    /*
+     *  Sets this->count to count, rounding up to the appropriate SIMD
+     *  block size (because Eigen sometimes returns different results
+     *  depending on whether it took the SIMD or non-SIMD path).
+     */
+    void setCount(size_t count);
+
 public:
     /*
      *  Multi-point evaluation (values must be stored with set)
      */
     Eigen::Block<decltype(f), 1, Eigen::Dynamic> values(size_t count);
+    Eigen::Block<decltype(f), 1, Eigen::Dynamic> values(
+            size_t count, std::shared_ptr<Tape> tape);
 
     /*
      *  Changes a variable's value
@@ -93,6 +100,8 @@ public:
      *  This call performs O(i) work to set up the ambig array
      */
     Eigen::Block<decltype(ambig), 1, Eigen::Dynamic> getAmbiguous(size_t i);
+    Eigen::Block<decltype(ambig), 1, Eigen::Dynamic> getAmbiguous(
+            size_t i, std::shared_ptr<Tape> tape);
 
     /*  Make an aligned new operator, as this class has Eigen structs
      *  inside of it (which are aligned for SSE) */

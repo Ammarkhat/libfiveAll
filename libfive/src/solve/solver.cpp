@@ -2,24 +2,16 @@
 libfive: a CAD kernel for modeling with implicit functions
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #include <numeric>
 
 #include "libfive/solve/solver.hpp"
 #include "libfive/tree/tree.hpp"
+#include "libfive/eval/deck.hpp"
+#include "libfive/eval/tape.hpp"
 #include "libfive/eval/eval_jacobian.hpp"
 
 namespace Kernel {
@@ -28,8 +20,8 @@ namespace Solver
 {
 
 static std::pair<float, Solution> findRoot(
-        JacobianEvaluator& e, const Eigen::Vector3f pos,
-        Solution vars, unsigned gas)
+        JacobianEvaluator& e, Tape::Handle tape,
+        const Eigen::Vector3f pos, Solution vars, unsigned gas)
 {
     const float EPSILON = 1e-6f;
 
@@ -40,12 +32,12 @@ static std::pair<float, Solution> findRoot(
         ds.insert({v.first, 0});
     }
 
-    float r = e.eval(pos);
+    float r = e.eval(pos, tape);
     bool converged = false;
     while (!converged && fabs(r) >= EPSILON && --gas)
     {
         // Evaluate and update our local gradient
-        for (auto& d : e.gradient(pos))
+        for (auto& d : e.gradient(pos, tape))
         {
             auto v = ds.find(d.first);
             if (v != ds.end())
@@ -76,7 +68,7 @@ static std::pair<float, Solution> findRoot(
             }
 
             // Get new residual
-            const auto r_ = e.eval(pos);
+            const auto r_ = e.eval(pos, tape);
 
             // Find change in residuals
             const auto diff = r - r_;
@@ -108,14 +100,15 @@ std::pair<float, Solution> findRoot(
         const Tree& t, const std::map<Tree::Id, float>& vars,
         const Eigen::Vector3f pos, const Mask& mask, unsigned gas)
 {
-    auto tape = std::make_shared<Tape>(t);
-    JacobianEvaluator e(tape, vars);
-    return findRoot(e, vars, pos, mask, gas);
+    auto deck = std::make_shared<Deck>(t);
+    JacobianEvaluator e(deck, vars);
+    return findRoot(e, deck->tape, vars, pos, mask, gas);
 }
 
 std::pair<float, Solution> findRoot(
-        JacobianEvaluator& e, std::map<Tree::Id, float> vars,
-        const Eigen::Vector3f pos, const Mask& mask, unsigned gas)
+        JacobianEvaluator& e, Tape::Handle tape,
+        std::map<Tree::Id, float> vars, const Eigen::Vector3f pos,
+        const Mask& mask, unsigned gas)
 {
     // Load initial variable values here
     for (auto& v : vars)
@@ -129,7 +122,7 @@ std::pair<float, Solution> findRoot(
         vars.erase(v);
     }
 
-    return findRoot(e, pos, vars, gas);
+    return findRoot(e, tape, pos, vars, gas);
 }
 
 } // namespace Solver

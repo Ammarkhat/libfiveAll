@@ -1,20 +1,11 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
+
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #pragma once
 
@@ -24,9 +15,11 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #include <map>
 
 #include "libfive/tree/opcode.hpp"
-#include "libfive/tree/oracle_clause.hpp"
 
 namespace Kernel {
+
+// Forward declaration
+class OracleClause;
 
 /*
  *  A Tree represents a tree of math expressions.
@@ -44,9 +37,9 @@ public:
     Tree(float v);
 
     /*
-     *  Returns a Tree for the given oracle, taking ownership
+     *  Returns a Tree for the given oracle, taking ownership.
      */
-    Tree(std::unique_ptr<const OracleClause> oracle);
+    Tree(std::unique_ptr<const OracleClause>&& oracle);
 
     /*
      *  Constructors for individual axes
@@ -77,12 +70,20 @@ public:
      */
     static Tree var();
 
+    /*
+     *  Destructor to ensure thread-safety while manipulating the Cache
+     */
+    ~Tree();
+
     /*  Bitfield enum for node flags */
     enum Flags {
         /*  Does this Id only contain constants and variables
          *  (no VAR_X, VAR_Y, VAR_Z, or ORACLE opcodes allowed) */
         FLAG_LOCATION_AGNOSTIC  = (1<<1),
     };
+
+    /*  Simple enum for branch selection */
+    enum Direction {LEFT, RIGHT};
 
     /*  This is where tree data is actually stored  */
     struct Tree_ {
@@ -104,6 +105,9 @@ public:
         /*  Only populated for operations  */
         const std::shared_ptr<Tree_> lhs;
         const std::shared_ptr<Tree_> rhs;
+
+        /*  Programmatic branch lookup */
+        const std::shared_ptr<Tree_> branch(Direction d);
 
         /*
          *  Pushes a Scheme-format serialization to an ostream
@@ -146,7 +150,15 @@ public:
     /*
      *  Executes an arbitrary remapping
      */
-    Tree remap(std::map<Id, std::shared_ptr<Tree_>> m) const;
+    Tree remap(std::map<Id, Tree> m) const;
+
+    /*
+     *  Returns a tree in which all VAR clauses are wrapped in a
+     *  CONST_VAR clause.  This effectively disables their contribution
+     *  to Jacobian (per-variable gradient) evaluation, which is useful
+     *  for making direct modeling more nuanced.
+     */
+    Tree makeVarsConstant() const;
 
     /*
      *  Walks the tree in rank order, from lowest to highest
@@ -154,20 +166,20 @@ public:
      */
     std::list<Tree> ordered() const;
 
-    /*
-     *  Serializes to a vector of bytes
-     */
-    std::vector<uint8_t> serialize() const;
-
-    /*
-     *  Deserialize a tree from a set of bytes
-     */
-    static Tree deserialize(const std::vector<uint8_t>& data);
+    void serialize(std::ostream& out) const;
+    static Tree deserialize(std::istream& in);
 
     /*
      *  Loads a tree from a file
      */
     static Tree load(const std::string& filename);
+
+    /*
+     *  Returns the left-hand and right-hand inputs as trees; if the input
+     *  is invalid, returns the same result as Invalid()
+     */
+    Tree lhs() const;
+    Tree rhs() const;
 
 protected:
     /*
@@ -223,3 +235,6 @@ OP_BINARY(compare);
  *  Deserialize with Scheme-style syntax
  */
 // std::ostream& operator<<(std::ostream& stream, const Kernel::Tree& tree);
+
+// This include goes at the bottom to work around circular ordering
+#include "libfive/oracle/oracle_clause.hpp"

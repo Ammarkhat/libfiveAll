@@ -1,113 +1,112 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
+
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #include "libfive/eval/eval_array.hpp"
+#include "libfive/eval/tape.hpp"
+#include "libfive/eval/deck.hpp"
 
 namespace Kernel {
 
 constexpr size_t ArrayEvaluator::N;
 
-ArrayEvaluator::ArrayEvaluator(std::shared_ptr<Tape> t)
-    : ArrayEvaluator(t, std::map<Tree::Id, float>())
+ArrayEvaluator::ArrayEvaluator(const Tree& root)
+    : ArrayEvaluator(std::make_shared<Deck>(root))
 {
     // Nothing to do here
 }
 
 ArrayEvaluator::ArrayEvaluator(
-        std::shared_ptr<Tape> t, const std::map<Tree::Id, float>& vars)
-    : BaseEvaluator(t, vars), f(tape->num_clauses + 1, N)
+        const Tree& root, const std::map<Tree::Id, float>& vars)
+    : ArrayEvaluator(std::make_shared<Deck>(root), vars)
+{
+    // Nothing to do here
+}
+
+ArrayEvaluator::ArrayEvaluator(std::shared_ptr<Deck> d)
+    : ArrayEvaluator(d, std::map<Tree::Id, float>())
+{
+    // Nothing to do here
+}
+
+ArrayEvaluator::ArrayEvaluator(
+        std::shared_ptr<Deck> d, const std::map<Tree::Id, float>& vars)
+    : BaseEvaluator(d, vars), f(deck->num_clauses + 1, N)
 {
     // Unpack variables into result array
-    for (auto& v : t->vars.right)
+    for (auto& v : deck->vars.right)
     {
         auto var = vars.find(v.first);
         f.row(v.second) = (var != vars.end()) ? var->second : 0;
     }
 
     // Unpack constants into result array
-    for (auto& c : tape->constants)
+    for (auto& c : deck->constants)
     {
         f.row(c.first) = c.second;
     }
 }
 
-float ArrayEvaluator::eval(const Eigen::Vector3f& pt)
-{
-    set(pt, 0);
-    return values(1)(0);
-}
-
-float ArrayEvaluator::evalAndPush(const Eigen::Vector3f& pt)
-{
-    auto out = eval(pt);
-    tape->push([&](Opcode::Opcode op, Clause::Id /* id */,
-                  Clause::Id a, Clause::Id b)
-    {
-        // For min and max operations, we may only need to keep one branch
-        // active if it is decisively above or below the other branch.
-        if (op == Opcode::MAX)
-        {
-            if (f(a, 0) > f(b, 0))
-            {
-                return Tape::KEEP_A;
-            }
-            else if (f(b, 0) > f(a, 0))
-            {
-                return Tape::KEEP_B;
-            }
-            else
-            {
-                return Tape::KEEP_BOTH;
-            }
-        }
-        else if (op == Opcode::MIN)
-        {
-            if (f(a, 0) > f(b, 0))
-            {
-                return Tape::KEEP_B;
-            }
-            else if (f(b, 0) > f(a, 0))
-            {
-                return Tape::KEEP_A;
-            }
-            else
-            {
-                return Tape::KEEP_BOTH;
-            }
-        }
-        return Tape::KEEP_ALWAYS;
-    }, Tape::SPECIALIZED);
-    return out;
-}
 
 Eigen::Block<decltype(ArrayEvaluator::f), 1, Eigen::Dynamic>
 ArrayEvaluator::values(size_t _count)
 {
-    count = _count;
-    return f.block<1, Eigen::Dynamic>(tape->rwalk(*this), 0, 1, count);
+    return values(_count, deck->tape);
+}
+
+Eigen::Block<decltype(ArrayEvaluator::f), 1, Eigen::Dynamic>
+ArrayEvaluator::values(size_t count, Tape::Handle tape)
+{
+    setCount(count);
+
+    deck->bindOracles(tape);
+    deck->setOracleCount(count);
+    auto index = tape->rwalk(*this);
+    deck->unbindOracles();
+
+    return f.block<1, Eigen::Dynamic>(index, 0, 1, count);
+}
+
+void ArrayEvaluator::setCount(size_t count)
+{
+#if defined EIGEN_VECTORIZE_AVX512
+    #define LIBFIVE_SIMD_SIZE 16
+#elif defined EIGEN_VECTORIZE_AVX
+    #define LIBFIVE_SIMD_SIZE 8
+#elif defined EIGEN_VECTORIZE_SSE
+    #define LIBFIVE_SIMD_SIZE 4
+#elif defined EIGEN_VECTORIZE
+    #warning "EIGEN_VECTORIZE is set but no vectorization flag is found"
+    #define LIBFIVE_SIMD_SIZE 0
+#else
+    #warning "No SIMD flags detected"
+    #define LIBFIVE_SIMD_SIZE 0
+#endif
+    // If we have SIMD instructions, then round the evaluation size up
+    // to the nearest block, to avoid issues where Eigen's SIMD and
+    // non-SIMD paths produce different results.
+    if (LIBFIVE_SIMD_SIZE)
+    {
+        this->count = ((count + LIBFIVE_SIMD_SIZE - 1) / LIBFIVE_SIMD_SIZE)
+                * LIBFIVE_SIMD_SIZE;
+    }
+    else
+    {
+        this->count = count;
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 bool ArrayEvaluator::setVar(Tree::Id var, float value)
 {
-    auto v = tape->vars.right.find(var);
-    if (v != tape->vars.right.end())
+    auto v = deck->vars.right.find(var);
+    if (v != deck->vars.right.end())
     {
         bool changed = f(v->second, 0) != value;
         f.row(v->second) = value;
@@ -124,6 +123,12 @@ bool ArrayEvaluator::setVar(Tree::Id var, float value)
 Eigen::Block<decltype(ArrayEvaluator::ambig), 1, Eigen::Dynamic>
 ArrayEvaluator::getAmbiguous(size_t i)
 {
+    return getAmbiguous(i, deck->tape);
+}
+
+Eigen::Block<decltype(ArrayEvaluator::ambig), 1, Eigen::Dynamic>
+ArrayEvaluator::getAmbiguous(size_t i, Tape::Handle tape)
+{
     // Reset the ambiguous array to all false
     ambig = false;
 
@@ -133,9 +138,9 @@ ArrayEvaluator::getAmbiguous(size_t i)
         {
             if (op == Opcode::ORACLE)
             {
-                tape->oracles[a]->checkAmbiguous(ambig.head(i));
+                deck->oracles[a]->checkAmbiguous(ambig.head(i));
             }
-            else if (op == Opcode::MIN || op == Opcode::MAX)
+            else if (op == Opcode::OP_MIN || op == Opcode::OP_MAX)
             {
                 ambig.head(i) = ambig.head(i) ||
                     (f.block(a, 0, 1, i) ==
@@ -156,34 +161,34 @@ void ArrayEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
 #define b f.row(b_).head(count)
     switch (op)
     {
-        case Opcode::ADD:
+        case Opcode::OP_ADD:
             out = a + b;
             break;
-        case Opcode::MUL:
+        case Opcode::OP_MUL:
             out = a * b;
             break;
-        case Opcode::MIN:
+        case Opcode::OP_MIN:
             out = a.cwiseMin(b);
             break;
-        case Opcode::MAX:
+        case Opcode::OP_MAX:
             out = a.cwiseMax(b);
             break;
-        case Opcode::SUB:
+        case Opcode::OP_SUB:
             out = a - b;
             break;
-        case Opcode::DIV:
+        case Opcode::OP_DIV:
             out = a / b;
             break;
-        case Opcode::ATAN2:
+        case Opcode::OP_ATAN2:
             for (auto i=0; i < a.size(); ++i)
             {
                 out(i) = atan2(a(i), b(i));
             }
             break;
-        case Opcode::POW:
+        case Opcode::OP_POW:
             out = a.pow(b);
             break;
-        case Opcode::NTH_ROOT:
+        case Opcode::OP_NTH_ROOT:
             for (auto i=0; i < a.size(); ++i)
             {
                 // Work around a limitation in pow by using boost's nth-root
@@ -195,7 +200,7 @@ void ArrayEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
                     out(i) = pow(a(i), 1.0f/b(i));
             }
             break;
-        case Opcode::MOD:
+        case Opcode::OP_MOD:
             for (auto i=0; i < a.size(); ++i)
             {
                 out(i) = std::fmod(a(i), b(i));
@@ -205,10 +210,10 @@ void ArrayEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
                 }
             }
             break;
-        case Opcode::NANFILL:
+        case Opcode::OP_NANFILL:
             out = a.isNaN().select(b, a);
             break;
-        case Opcode::COMPARE:
+        case Opcode::OP_COMPARE:
             for (auto i=0; i < a.size(); ++i)
             {
                 if      (a(i) < b(i))   out(i) = -1;
@@ -217,43 +222,43 @@ void ArrayEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
             }
             break;
 
-        case Opcode::SQUARE:
+        case Opcode::OP_SQUARE:
             out = a * a;
             break;
-        case Opcode::SQRT:
+        case Opcode::OP_SQRT:
             out = sqrt(a);
             break;
-        case Opcode::NEG:
+        case Opcode::OP_NEG:
             out = -a;
             break;
-        case Opcode::SIN:
+        case Opcode::OP_SIN:
             out = sin(a);
             break;
-        case Opcode::COS:
+        case Opcode::OP_COS:
             out = cos(a);
             break;
-        case Opcode::TAN:
+        case Opcode::OP_TAN:
             out = tan(a);
             break;
-        case Opcode::ASIN:
+        case Opcode::OP_ASIN:
             out = asin(a);
             break;
-        case Opcode::ACOS:
+        case Opcode::OP_ACOS:
             out = acos(a);
             break;
-        case Opcode::ATAN:
+        case Opcode::OP_ATAN:
             out = atan(a);
             break;
-        case Opcode::LOG:
+        case Opcode::OP_LOG:
             out = log(a);
             break;
-        case Opcode::EXP:
+        case Opcode::OP_EXP:
             out = exp(a);
             break;
-        case Opcode::ABS:
+        case Opcode::OP_ABS:
             out = abs(a);
             break;
-        case Opcode::RECIP:
+        case Opcode::OP_RECIP:
             out = 1 / a;
             break;
 
@@ -262,15 +267,15 @@ void ArrayEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
             break;
 
         case Opcode::ORACLE:
-            tape->oracles[a_]->evalArray(out);
+            deck->oracles[a_]->evalArray(out);
             break;
 
         case Opcode::INVALID:
-        case Opcode::CONST:
+        case Opcode::CONSTANT:
         case Opcode::VAR_X:
         case Opcode::VAR_Y:
         case Opcode::VAR_Z:
-        case Opcode::VAR:
+        case Opcode::VAR_FREE:
         case Opcode::LAST_OP: assert(false);
     }
 #undef out
