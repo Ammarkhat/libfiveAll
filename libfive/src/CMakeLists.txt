@@ -32,6 +32,9 @@ add_library(five SHARED
     tree/opcode.cpp
     tree/template.cpp
     tree/tree.cpp
+    oracle/oracle_custom_function.cpp
+    oracle/oracle_clause_custom_function.cpp
+    oracle/custom_function.cpp
     libfive.cpp
 
     ${CMAKE_CURRENT_BINARY_DIR}/version.c

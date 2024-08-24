@@ -9,6 +9,12 @@
 #include "libfive/solve/bounds.hpp"
 #include "libfive/render/brep/mesh.hpp"
 
+#include "libfive/oracle/custom_function.hpp"
+#include "libfive/oracle/oracle_custom_function.hpp"
+#include <Eigen/Eigen>
+#include "gridBased.hpp"
+#include "gridBasedCircles.hpp"
+
 // #include <bits/stdc++.h>
 // #include <iostream>
 // #include <chrono>
@@ -347,7 +353,7 @@ int parseNode(Node* parentNode, vector<string> words, int i){
     int nextPosition = i;
     Node node;
     string word = words[i];
-    if(word == "union" || word == "intersection" || word == "difference" || word == "blend"){
+    if(word == "union" || word == "intersection" || word == "difference" || word == "blend" || word == "spheres"){
         node.type = word;
         nextPosition = parseNode(&node, words, i+2);
         parentNode->children.push_back(node);
@@ -493,6 +499,129 @@ int parseNode(Node* parentNode, vector<string> words, int i){
         }
     }
     return nextPosition;
+}
+Tree buildBruteForceSpheres(std::vector<Sphere>& spheresArray){
+  std::function<float(float, float, float)> f = [&spheresArray](float x, float y, float z) {
+    float totalD = 1000000;
+    for (size_t i = 0; i < spheresArray.size(); i++)
+    {
+      auto s = spheresArray[i];
+      auto d = sqrt((x-s.cx) * (x-s.cx) + (y-s.cy) * (y-s.cy) + (z-s.cz) * (z-s.cz)) - s.radius;
+      if(d < totalD){
+        totalD = d;
+      }
+    }
+    return totalD;
+  };
+    std::function<Eigen::Vector3f(float, float, float)> fd = [&spheresArray](float x, float y, float z) {
+    float totalD = 1000000;
+    int minIndex = -1;
+    for (size_t i = 0; i < spheresArray.size(); i++)
+    {
+      auto s = spheresArray[i];
+      auto d = sqrt((x-s.cx) * (x-s.cx) + (y-s.cy) * (y-s.cy) + (z-s.cz) * (z-s.cz)) - s.radius;
+      if(d < totalD){
+        totalD = d;
+        minIndex = i;
+      }
+    }
+    auto s = spheresArray[minIndex];
+    auto v = Eigen::Vector3f{x-s.cx,y-s.cy,z-s.cz};
+    return v;
+  };
+  return Tree(customFunction(f, fd));
+}
+
+Tree buildGridBasedSpheres(std::vector<Sphere>& spheresArray){
+
+  // ************** grid based **********************************
+  // auto t1 = std::chrono::high_resolution_clock::now();
+  std::vector<double> box {-150, -130, -150, 150, 150, 150};
+  auto voxelData = createVoxelData(box, 150, 1.51);
+  std::vector<std::vector<int>>& innerSpheres = voxelData.spheres;
+  voxelizeSpheres(spheresArray, voxelData, innerSpheres, 2);
+
+  std::vector<std::vector<int>>& secondarySpheres = voxelData.secondarySpheres;
+  voxelizeSpheres(spheresArray, voxelData, secondarySpheres, 20);
+  // auto t2 = std::chrono::high_resolution_clock::now();
+  // std::cout << "grid construction time (s): " << (t2 - t1).count() / 1.0e9 << std::endl;
+
+  double vminx = voxelData.min[0];
+  double vminy = voxelData.min[1];
+  double vminz = voxelData.min[2];
+  double step = voxelData.step;
+  double invStep = 1.0 / step;
+  int rx = voxelData.dims[0];
+  int ry = voxelData.dims[1];
+  int rxy = rx * ry;
+
+  std::vector<int> spheresIndices;
+  for( int i = 0; i < spheresArray.size(); i++ )
+    spheresIndices.push_back( i );
+
+  int total = 0;
+  int allSpheres = 0;
+  int someSpheres = 0;
+
+  std::function<float(float, float, float)> f = [&spheresArray, &voxelData, rx, rxy, step, vminx, vminy, vminz, invStep, &spheresIndices](float x, float y, float z) {
+    // Precompute the indices and distance bounds
+    int i = static_cast<int>(std::floor((x - vminx) * invStep));
+    int j = static_cast<int>(std::floor((y - vminy) * invStep));
+    int k = static_cast<int>(std::floor((z - vminz) * invStep));
+    int n = i + j * rx + k * rxy;
+
+    float totalD = 1000000.0f;  // Large initial value
+    const auto& selectedSpheres = voxelData.spheres[n].empty() ? voxelData.secondarySpheres[n] : voxelData.spheres[n];
+    // std::cout << selectedSpheres.size() << " ";
+
+    // Reference to the sphere array to avoid multiple lookups
+    const auto& spheres = selectedSpheres.empty() ? spheresIndices : selectedSpheres;
+
+    // Calculate the minimum distance
+    for (const auto& si : spheres) {
+        const auto& s = spheresArray[si];
+        float dx = x - s.cx;
+        float dy = y - s.cy;
+        float dz = z - s.cz;
+        float dist = sqrt(dx * dx + dy * dy + dz * dz) - s.radius;
+        totalD = std::min(totalD, dist);
+    }
+
+    return totalD;
+  };
+  std::function<Eigen::Vector3f(float, float, float)> fd = [&spheresArray, &voxelData, rx, rxy, step, vminx, vminy, vminz, invStep, &spheresIndices](float x, float y, float z) {
+      // Precompute the indices and distance bounds
+      int i = static_cast<int>(std::floor((x - vminx) * invStep));
+      int j = static_cast<int>(std::floor((y - vminy) * invStep));
+      int k = static_cast<int>(std::floor((z - vminz) * invStep));
+      int n = i + j * rx + k * rxy;
+
+      float minDist = 1000000.0f;  // Large initial value
+      int minIndex = -1;
+
+      const auto& selectedSpheresIndices = voxelData.spheres[n].empty() ? voxelData.secondarySpheres[n] : voxelData.spheres[n];
+
+      const auto& spheresToCheck = selectedSpheresIndices.empty() ? spheresIndices : selectedSpheresIndices;
+
+      // Iterate over the relevant spheres
+      for (const auto si : spheresToCheck) {
+          const auto& s = spheresArray[si];
+          float dx = x - s.cx;
+          float dy = y - s.cy;
+          float dz = z - s.cz;
+          float dist = std::sqrt(dx * dx + dy * dy + dz * dz) - s.radius;
+          if (dist < minDist) {
+              minDist = dist;
+              minIndex = si;
+          }
+      }
+
+      // Calculate the vector based on the sphere with the minimum distance
+      const auto& s = spheresArray[minIndex];
+      Eigen::Vector3f v(x - s.cx, y - s.cy, z - s.cz);
+      return v;
+  };
+  return Tree(customFunction(f, fd));
 }
 
 Tree buildTree(Node& root) {
@@ -678,6 +807,16 @@ Tree buildTree(Node& root) {
       Tree tr = buildTree(root.children[0]);
       tr = move(tr, root.data[0], root.data[1], root.data[2]);  
       return tr;
+    } else if(root.type == "spheres"){
+      std::vector<Sphere> spheresArray;
+      for (size_t i = 0; i < root.children.size(); i++)
+      {
+        auto sph = root.children[i];
+        Sphere sp1{(float)sph.data[0], (float)sph.data[1], (float)sph.data[2], (float)sph.data[3]};
+        spheresArray.push_back(sp1);
+      }
+      // return buildGridBasedSpheres(spheresArray);
+      return buildBruteForceSpheres(spheresArray);
     } else if(root.children.size() > 0){
       return buildTree(root.children[0]);
     }
