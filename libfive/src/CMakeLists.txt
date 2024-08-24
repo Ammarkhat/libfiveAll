@@ -28,10 +28,6 @@ add_library(five SHARED
     eval/eval_point.cpp
     eval/tape.cpp
     eval/feature.cpp
-    oracle/transformed_oracle.cpp
-    render/discrete/heightmap.cpp
-    render/discrete/voxels.cpp
-    render/brep/contours.cpp
     render/brep/progress.cpp
     render/brep/mesh.cpp
     render/brep/neighbor_tables.cpp
@@ -65,14 +61,10 @@ add_library(five SHARED
     tree/deserializer.cpp
     tree/serializer.cpp
     tree/tree.cpp
-<<<<<<< HEAD
     oracle/oracle_custom_function.cpp
     oracle/oracle_clause_custom_function.cpp
     oracle/custom_function.cpp
-=======
     oracle/oracle_clause.cpp
-    oracle/transformed_oracle_clause.cpp
->>>>>>> 3b634b3d5601e931ad2f8e809524ded009972370
     libfive.cpp
 
     ${CMAKE_CURRENT_BINARY_DIR}/version.c

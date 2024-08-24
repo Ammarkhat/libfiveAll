@@ -144,7 +144,7 @@ endif()
 
 ################################################################################
 
-set(CMAKE_CXX_FLAGS "-DEMSCRIPTEN_HAS_UNBOUND_TYPE_NAMES=0 -fno-rtti -fno-exceptions -Wall -Wextra -fPIC -pedantic -Werror=switch")
+set(CMAKE_CXX_FLAGS "-DEMSCRIPTEN_HAS_UNBOUND_TYPE_NAMES=0 -fno-exceptions -Wall -Wextra -fPIC -pedantic -Werror=switch")
 
 if (LIBFIVE_WITH_MARCH_NATIVE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
