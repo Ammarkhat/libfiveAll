@@ -18,19 +18,6 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 */
 #pragma once
 
-#include "libfive/render/brep/region.hpp"
-#include "libfive/eval/eval_interval.hpp"
-
-namespace Kernel {
-
-#ifdef ENABLE_FIND_BOUNDS_EXPERIMENTAL
-Region<3> findBounds(const Tree& t);
-Region<3> findBounds(const Tree& t, const std::map<Tree::Id, float>& vars);
-Region<3> findBounds(IntervalEvaluator* eval);
-#else
-#error \
-The findBounds API is experimental and only works for the simplest of shapes. \
-If you still want to use it, please #define ENABLE_FIND_BOUNDS_EXPERIMENTAL.
-#endif
-
-}   // namespace Kernel
+/*  Compile-time power */
+static constexpr unsigned ipow(unsigned p, unsigned n)
+{ return (n == 0) ? 1 : p * ipow(p, n - 1); }

@@ -1,6 +1,6 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
-Copyright (C) 2017  Matt Keeter
+Copyright (C) 2018  Matt Keeter
 
 This library is free software; you can redistribute it and/or
 modify it under the terms of the GNU Lesser General Public
@@ -18,19 +18,24 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 */
 #pragma once
 
-#include "libfive/render/brep/region.hpp"
-#include "libfive/eval/eval_interval.hpp"
+#include <Eigen/Eigen>
+#include <Eigen/StdVector>
+
+#include <boost/container/small_vector.hpp>
 
 namespace Kernel {
 
-#ifdef ENABLE_FIND_BOUNDS_EXPERIMENTAL
-Region<3> findBounds(const Tree& t);
-Region<3> findBounds(const Tree& t, const std::map<Tree::Id, float>& vars);
-Region<3> findBounds(IntervalEvaluator* eval);
-#else
-#error \
-The findBounds API is experimental and only works for the simplest of shapes. \
-If you still want to use it, please #define ENABLE_FIND_BOUNDS_EXPERIMENTAL.
-#endif
+template <unsigned N>
+struct Intersection {
+    Eigen::Matrix<double, N, 1> pos;
+    Eigen::Matrix<double, N, 1>  deriv;
+    double value;
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+};
+
+template <size_t N>
+using IntersectionVec =
+        boost::container::small_vector<Intersection<N>, 4,
+            Eigen::aligned_allocator<Intersection<N>>>;
 
 }   // namespace Kernel
