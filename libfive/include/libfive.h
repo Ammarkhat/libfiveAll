@@ -125,8 +125,6 @@ const char* libfive_arg_name(libfive_args* a, uint32_t i);
 void libfive_set_arg_name(libfive_args* a, uint32_t i, const char* name);
 void libfive_set_arg_id(libfive_args* a, uint32_t i, libfive_id id);
 
-libfive_template libfive_tree_to_template(libfive_tree t);
-libfive_args* libfive_template_args(libfive_template t);
 
 // ////////////////////////////////////////////////////////////////////////////////
 

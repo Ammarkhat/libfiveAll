@@ -653,7 +653,7 @@ class GridBasedCirclesCFW: public CustomFunctionWrapper{
 
     GridBasedCirclesCFW(std::vector<Circle>& circlesArray): circlesArray(circlesArray){
       std::vector<double> box {-150, -130, 150, 150};
-       voxelData = createPixelData(box, 150, 1.51);
+      voxelData = createPixelData(box, 150, 1.51);
       std::unordered_map<int, std::vector<short>>& innerSpheres = voxelData.circles;
       PixalizeCircles(circlesArray, voxelData, innerSpheres, 2);
 
