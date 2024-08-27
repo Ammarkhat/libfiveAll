@@ -21,7 +21,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
 #ifdef __cplusplus
 #include "libfive/tree/tree.hpp"
-#include "libfive/tree/template.hpp"
+#include "libfive/tree/archive.hpp"
 
 extern "C" {
 #endif
@@ -66,11 +66,11 @@ int libfive_opcode_args(int op);
 #ifdef __cplusplus
 typedef Kernel::Tree* libfive_tree;
 typedef Kernel::Tree::Id libfive_id;
-typedef Kernel::Template* libfive_template;
+typedef Kernel::Archive* libfive_archive;
 #else
 typedef void* libfive_tree;
 typedef void* libfive_id;
-typedef void* libfive_template;
+typedef void* libfive_archive;
 #endif
 
 libfive_tree libfive_tree_x();
@@ -82,6 +82,8 @@ bool libfive_tree_is_var(libfive_tree t);
 
 libfive_tree libfive_tree_const(float f);
 float libfive_tree_get_const(libfive_tree t, bool* success);
+
+libfive_tree libfive_tree_constant_vars(libfive_tree t);
 
 libfive_tree libfive_tree_nonary(int op);
 libfive_tree libfive_tree_unary(int op, libfive_tree a);

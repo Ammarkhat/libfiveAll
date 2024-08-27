@@ -23,9 +23,11 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #include <list>
 #include <cmath>
 #include <cassert>
+#include <array>
 
 #include "libfive/tree/cache.hpp"
-#include "libfive/tree/template.hpp"
+#include "libfive/tree/archive.hpp"
+#include "libfive/tree/transformed_oracle_clause.hpp"
 
 namespace Kernel {
 
@@ -35,7 +37,7 @@ Tree::Tree()
     // Nothing to do here
 }
 
-Tree::Tree(std::unique_ptr<const OracleClause> o)
+Tree::Tree(std::unique_ptr<const OracleClause>&& o)
     : ptr(std::shared_ptr<Tree_>(new Tree_{
         Opcode::ORACLE,
         0, // flags
@@ -65,14 +67,14 @@ Tree::Tree(Opcode::Opcode op, Tree a, Tree b)
            (Opcode::args(op) == 2 && a.ptr.get() != 0 && b.ptr.get() != 0));
 
     // POW only accepts integral values as its second argument
-    if (op == Opcode::POW)
+    if (op == Opcode::OP_POW)
     {
-        assert(b->op == Opcode::CONST &&
+        assert(b->op == Opcode::CONSTANT &&
                b->value == std::round(b->value));
     }
-    else if (op == Opcode::NTH_ROOT)
+    else if (op == Opcode::OP_NTH_ROOT)
     {
-        assert(b->op == Opcode::CONST &&
+        assert(b->op == Opcode::CONSTANT &&
                b->value == std::round(b->value) &&
                b->value > 0);
     }
@@ -85,11 +87,11 @@ Tree Tree::var()
 
 Tree::Tree_::~Tree_()
 {
-    if (op == Opcode::CONST)
+    if (op == Opcode::CONSTANT)
     {
         Cache::instance()->del(value);
     }
-    else if (op != Opcode::VAR && op != Opcode::ORACLE)
+    else if (op != Opcode::VAR_FREE && op != Opcode::ORACLE)
     {
         Cache::instance()->del(op, lhs, rhs);
     }
@@ -128,12 +130,14 @@ std::list<Tree> Tree::ordered() const
 
 std::vector<uint8_t> Tree::serialize() const
 {
-    return Template(*this).serialize();
+    return Archive(*this).serialize();
 }
 
 Tree Tree::deserialize(const std::vector<uint8_t>& data)
 {
-    return Template::deserialize(data).tree;
+    auto s = Archive::deserialize(data).shapes;
+    assert(s.size() == 1);
+    return s.front().tree;
 }
 
 // Tree Tree::load(const std::string& filename)
@@ -155,29 +159,56 @@ Tree Tree::deserialize(const std::vector<uint8_t>& data)
 
 Tree Tree::remap(Tree X_, Tree Y_, Tree Z_) const
 {
-    std::map<Tree::Id, std::shared_ptr<Tree_>> m = {
-        {X().id(), X_.ptr}, {Y().id(), Y_.ptr}, {Z().id(), Z_.ptr}};
+    std::map<Tree::Id, Tree> m = {
+        {X().id(), X_}, {Y().id(), Y_}, {Z().id(), Z_}};
 
     return remap(m);
 }
 
-Tree Tree::remap(std::map<Id, std::shared_ptr<Tree_>> m) const
+Tree Tree::remap(std::map<Id, Tree> m) const
 {
+    // Oracles only care about remapping X/Y/Z, so we extract them here.
+    auto get_remapped = [&](Tree target) {
+        auto itr = m.find(target.id());
+        return (itr == m.end()) ? target : Tree(itr->second);
+    };
+    auto X_ = get_remapped(Tree::X());
+    auto Y_ = get_remapped(Tree::Y());
+    auto Z_ = get_remapped(Tree::Z());
+
     for (const auto& t : ordered())
     {
         if (Opcode::args(t->op) >= 1)
         {
             auto lhs = m.find(t->lhs.get());
             auto rhs = m.find(t->rhs.get());
-            m.insert({t.id(), Cache::instance()->operation(t->op,
-                        lhs == m.end() ? t->lhs : lhs->second,
-                        rhs == m.end() ? t->rhs : rhs->second)});
+            m.insert({t.id(), Tree(Cache::instance()->operation(t->op,
+                        lhs == m.end() ? t->lhs : lhs->second.ptr,
+                        rhs == m.end() ? t->rhs : rhs->second.ptr))});
+        }
+        else if (t->op == Opcode::ORACLE)
+        {
+            m.insert({ t.id(), t->oracle->remap(t, X_, Y_, Z_) });
         }
     }
 
     // If this Tree was remapped, then return it; otherwise return itself
     auto r = m.find(id());
     return r == m.end() ? *this : Tree(r->second);
+}
+
+Tree Tree::makeVarsConstant() const
+{
+    std::map<Id, Tree> vars;
+    for (auto& o : ordered())
+    {
+        if (o->op == Opcode::VAR_FREE)
+        {
+            vars.insert({o.id(),
+                    Tree(Cache::instance()->operation(Opcode::CONST_VAR, o.ptr))});
+        }
+    }
+    return remap(vars);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -241,36 +272,36 @@ Tree Tree::remap(std::map<Id, std::shared_ptr<Tree_>> m) const
 // Mass-produce definitions for overloaded operations
 #define OP_UNARY(name, opcode) \
 Kernel::Tree name(const Kernel::Tree& a) { return Kernel::Tree(opcode, a); }
-OP_UNARY(square,    Kernel::Opcode::SQUARE)
-OP_UNARY(sqrt,      Kernel::Opcode::SQRT)
+OP_UNARY(square,    Kernel::Opcode::OP_SQUARE)
+OP_UNARY(sqrt,      Kernel::Opcode::OP_SQRT)
 Kernel::Tree Kernel::Tree::operator-() const
-    { return Kernel::Tree(Kernel::Opcode::NEG, *this); }
-OP_UNARY(abs,       Kernel::Opcode::ABS)
-OP_UNARY(sin,       Kernel::Opcode::SIN)
-OP_UNARY(cos,       Kernel::Opcode::COS)
-OP_UNARY(tan,       Kernel::Opcode::TAN)
-OP_UNARY(asin,      Kernel::Opcode::ASIN)
-OP_UNARY(acos,      Kernel::Opcode::ACOS)
-OP_UNARY(atan,      Kernel::Opcode::ATAN)
-OP_UNARY(log,       Kernel::Opcode::LOG)
-OP_UNARY(exp,       Kernel::Opcode::EXP)
+    { return Kernel::Tree(Kernel::Opcode::OP_NEG, *this); }
+OP_UNARY(abs,       Kernel::Opcode::OP_ABS)
+OP_UNARY(sin,       Kernel::Opcode::OP_SIN)
+OP_UNARY(cos,       Kernel::Opcode::OP_COS)
+OP_UNARY(tan,       Kernel::Opcode::OP_TAN)
+OP_UNARY(asin,      Kernel::Opcode::OP_ASIN)
+OP_UNARY(acos,      Kernel::Opcode::OP_ACOS)
+OP_UNARY(atan,      Kernel::Opcode::OP_ATAN)
+OP_UNARY(log,       Kernel::Opcode::OP_LOG)
+OP_UNARY(exp,       Kernel::Opcode::OP_EXP)
 #undef OP_UNARY
 
 #define OP_BINARY(name, opcode) \
 Kernel::Tree name(const Kernel::Tree& a, const Kernel::Tree& b) \
     { return Kernel::Tree(opcode, a, b); }
-OP_BINARY(operator+,    Kernel::Opcode::ADD)
-OP_BINARY(operator*,    Kernel::Opcode::MUL)
-OP_BINARY(min,          Kernel::Opcode::MIN)
-OP_BINARY(max,          Kernel::Opcode::MAX)
-OP_BINARY(operator-,    Kernel::Opcode::SUB)
-OP_BINARY(operator/,    Kernel::Opcode::DIV)
-OP_BINARY(atan2,        Kernel::Opcode::ATAN2)
-OP_BINARY(pow,          Kernel::Opcode::POW)
-OP_BINARY(nth_root,     Kernel::Opcode::NTH_ROOT)
-OP_BINARY(mod,          Kernel::Opcode::MOD)
-OP_BINARY(nanfill,      Kernel::Opcode::NANFILL)
-OP_BINARY(compare,      Kernel::Opcode::COMPARE)
+OP_BINARY(operator+,    Kernel::Opcode::OP_ADD)
+OP_BINARY(operator*,    Kernel::Opcode::OP_MUL)
+OP_BINARY(min,          Kernel::Opcode::OP_MIN)
+OP_BINARY(max,          Kernel::Opcode::OP_MAX)
+OP_BINARY(operator-,    Kernel::Opcode::OP_SUB)
+OP_BINARY(operator/,    Kernel::Opcode::OP_DIV)
+OP_BINARY(atan2,        Kernel::Opcode::OP_ATAN2)
+OP_BINARY(pow,          Kernel::Opcode::OP_POW)
+OP_BINARY(nth_root,     Kernel::Opcode::OP_NTH_ROOT)
+OP_BINARY(mod,          Kernel::Opcode::OP_MOD)
+OP_BINARY(nanfill,      Kernel::Opcode::OP_NANFILL)
+OP_BINARY(compare,      Kernel::Opcode::OP_COMPARE)
 #undef OP_BINARY
 
 

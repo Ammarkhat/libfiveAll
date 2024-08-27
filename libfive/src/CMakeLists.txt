@@ -13,7 +13,6 @@ endif()
 add_library(five SHARED
     eval/base.cpp
     eval/eval_interval.cpp
-    eval/eval_interval_array.cpp
     eval/eval_jacobian.cpp
     eval/eval_array.cpp
     eval/eval_deriv_array.cpp
@@ -22,19 +21,23 @@ add_library(five SHARED
     eval/eval_point.cpp
     eval/tape.cpp
     eval/feature.cpp
+    eval/transformed_oracle.cpp
     render/brep/xtree2.cpp
     render/brep/xtree3.cpp
     render/brep/mesh.cpp
     render/brep/marching.cpp
+    render/brep/neighbors.cpp
     solve/bounds.cpp
     solve/solver.cpp
     tree/cache.cpp
     tree/opcode.cpp
-    tree/template.cpp
+    tree/archive.cpp
     tree/tree.cpp
     oracle/oracle_custom_function.cpp
     oracle/oracle_clause_custom_function.cpp
     oracle/custom_function.cpp
+    tree/oracle_clause.cpp
+    tree/transformed_oracle_clause.cpp
     libfive.cpp
 
     ${CMAKE_CURRENT_BINARY_DIR}/version.c

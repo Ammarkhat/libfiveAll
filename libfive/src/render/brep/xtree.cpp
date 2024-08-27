@@ -95,7 +95,8 @@ std::unique_ptr<const XTree<N>> XTree<N>::build(
         return nullptr;
     }
 
-    auto out = new XTree(es, region, min_feature, max_err, multithread, cancel);
+    auto out = new XTree(es, region, min_feature, max_err,
+                         multithread, cancel, Neighbors<N>());
 
     // Return an empty XTree when cancelled
     // (to avoid potentially ambiguous or mal-constructed trees situations)
@@ -113,7 +114,7 @@ std::unique_ptr<const XTree<N>> XTree<N>::build(
 template <unsigned N>
 XTree<N>::XTree(XTreeEvaluator* eval, Region<N> region,
                 double min_feature, double max_err, bool multithread,
-                std::atomic_bool& cancel)
+                std::atomic_bool& cancel, Neighbors<N> neighbors)
     : region(region), _mass_point(Eigen::Matrix<double, N + 1, 1>::Zero()),
       AtA(Eigen::Matrix<double, N, N>::Zero()),
       AtB(Eigen::Matrix<double, N, 1>::Zero())
@@ -126,9 +127,15 @@ XTree<N>::XTree(XTreeEvaluator* eval, Region<N> region,
     // Clear all indices
     std::fill(index.begin(), index.end(), 0);
 
+    const bool do_recurse = ((region.upper - region.lower) > min_feature).any();
+
     // Do a preliminary evaluation to prune the tree
-    auto i = eval->interval.evalAndPush(region.lower3().template cast<float>(),
-                                        region.upper3().template cast<float>());
+    Interval::I i(-1, 1);
+    if (do_recurse)
+    {
+        i = eval->interval.evalAndPush(region.lower3().template cast<float>(),
+                                       region.upper3().template cast<float>());
+    }
 
     if (Interval::isFilled(i))
     {
@@ -145,7 +152,7 @@ XTree<N>::XTree(XTreeEvaluator* eval, Region<N> region,
         bool all_full  = true;
 
         // Recurse until volume is too small
-        if (((region.upper - region.lower) > min_feature).any())
+        if (do_recurse)
         {
             auto rs = region.subdivide();
 
@@ -159,10 +166,10 @@ XTree<N>::XTree(XTreeEvaluator* eval, Region<N> region,
                 for (unsigned i=0; i < children.size(); ++i)
                 {
                     futures[i] = std::async(std::launch::async,
-                        [&eval, &rs, i, min_feature, max_err, &cancel]()
+                        [&eval, &rs, &cancel, i, min_feature, max_err]()
                         { return new XTree(
                                 eval + i, rs[i], min_feature, max_err,
-                                false, cancel); });
+                                false, cancel, Neighbors<N>()); });
                 }
                 for (unsigned i=0; i < children.size(); ++i)
                 {
@@ -177,7 +184,7 @@ XTree<N>::XTree(XTreeEvaluator* eval, Region<N> region,
                     // Populate child recursively
                     children[i].reset(new XTree<N>(
                                 eval, rs[i], min_feature, max_err,
-                                false, cancel));
+                                false, cancel, neighbors.push(i, children)));
                 }
             }
 
@@ -194,6 +201,7 @@ XTree<N>::XTree(XTreeEvaluator* eval, Region<N> region,
             {
                 // Grab corner values from children
                 corners[i] = children[i]->corners[i];
+                corner_positions.row(i) = children[i]->corner_positions.row(i);
 
                 all_empty &= children[i]->type == Interval::EMPTY;
                 all_full  &= children[i]->type == Interval::FILLED;
@@ -202,6 +210,18 @@ XTree<N>::XTree(XTreeEvaluator* eval, Region<N> region,
         // Terminate recursion here
         else
         {
+            // Store the corner positions
+            for (unsigned i=0; i < (1 << N); ++i)
+            {
+                Eigen::Array<double, 1, N> out;
+                for (unsigned axis=0; axis < N; ++axis)
+                {
+                    out(axis) = (i & (1 << axis)) ? region.upper(axis)
+                                                  : region.lower(axis);
+                }
+                corner_positions.row(i) = out;
+            }
+
             // Pack corners into evaluator
             std::array<Eigen::Vector3f, 1 << N> pos;
             for (uint8_t i=0; i < children.size(); ++i)
@@ -652,7 +672,10 @@ XTree<N>::XTree(XTreeEvaluator* eval, Region<N> region,
     }
 
     // ...and we're done.
-    eval->interval.pop();
+    if (do_recurse)
+    {
+        eval->interval.pop();
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////

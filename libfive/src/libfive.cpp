@@ -23,7 +23,6 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "libfive/tree/opcode.hpp"
 #include "libfive/tree/tree.hpp"
-#include "libfive/tree/template.hpp"
 
 #include "libfive/render/brep/region.hpp"
 // #include "libfive/render/brep/contours.hpp"
@@ -64,18 +63,23 @@ libfive_tree libfive_tree_var() { return new Tree(Tree::var()); }
 
 bool libfive_tree_is_var(libfive_tree t)
 {
-    return (*t)->op == Opcode::VAR;
+    return (*t)->op == Opcode::VAR_FREE;
 }
 
 float libfive_tree_get_const(libfive_tree t, bool* success)
 {
-    if ((*t)->op == Opcode::CONST)
+    if ((*t)->op == Opcode::CONSTANT)
     {
         if (success) { *success = true; }
         return (*t)->value;
     }
     if (success) { *success = false; }
     return 0;
+}
+
+libfive_tree libfive_tree_constant_vars(libfive_tree t)
+{
+    return new Tree(t->makeVarsConstant());
 }
 
 libfive_tree libfive_tree_nonary(int op)
@@ -263,91 +267,6 @@ libfive_mesh* libfive_tree_render_mesh(libfive_tree tree, libfive_region3 R, flo
 //     auto ms = Mesh::render(*tree, region, 1/res);
 //     return ms->saveSTL(f);
 // }
-
-////////////////////////////////////////////////////////////////////////////////
-
-typedef Tree::Id libfive_id;
-
-struct libfive_args {
-    char** names;
-    libfive_id* ids;
-    libfive_tree* bindings;
-    uint32_t count;
-};
-
-void libfive_args_delete(libfive_args* a)
-{
-    for (unsigned i=0; i < a->count; ++i)
-    {
-        delete [] a->names[i];
-        libfive_tree_delete(a->bindings[i]);
-    }
-    delete [] a->names;
-    delete [] a->ids;
-    delete [] a->bindings;
-    delete a;
-}
-
-libfive_args* libfive_args_new(uint32_t count)
-{
-    auto a = new libfive_args;
-    a->count = count;
-    a->names = new char*[count];
-    a->bindings = new libfive_tree[count];
-    a->ids = new Tree::Id[count];
-
-    return a;
-}
-
-typedef Kernel::Template* libfive_template;
-
-const char* libfive_arg_name(libfive_args* a, uint32_t i)
-{
-    return (i >= a->count) ? nullptr : a->names[i];
-}
-
-void libfive_set_arg_name(libfive_args* a, uint32_t i, const char* name)
-{
-    if (i < a->count)
-    {
-        if (a->names[i] != nullptr)
-        {
-            delete [] a->names[i];
-        }
-        auto len = strlen(name);
-        a->names[i] = new char[len + 1];
-        memcpy(a->names[i], name, len);
-        a->names[i][len] = 0; // apply null termination
-    }
-}
-
-void libfive_set_arg_id(libfive_args* a, uint32_t i, libfive_id id)
-{
-    if (i < a->count)
-    {
-        a->ids[i] = id;
-    }
-}
-
-libfive_template libfive_tree_to_template(libfive_tree t)
-{
-    return new Template(*t);
-}
-
-libfive_args* libfive_template_args(libfive_template t)
-{
-    auto a = libfive_args_new(t->vars.size());
-    uint32_t i=0;
-
-    for (auto v : t->vars)
-    {
-        libfive_set_arg_name(a, i, v.second.c_str());
-        libfive_set_arg_id(a, i, v.first);
-        i++;
-    }
-
-    return a;
-}
 
 ////////////////////////////////////////////////////////////////////////////////
 
