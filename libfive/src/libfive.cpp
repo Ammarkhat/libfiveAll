@@ -28,13 +28,6 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 // #include "libfive/render/brep/contours.hpp"
 #include "libfive/render/brep/mesh.hpp"
 
-<<<<<<< HEAD
-#include "libfive/solve/bounds.hpp"
-=======
-#include "libfive/render/discrete/voxels.hpp"
-#include "libfive/render/discrete/heightmap.hpp"
->>>>>>> 5da8e8f656b51891cb98afea2f7f1e2c3feacf3c
-
 using namespace Kernel;
 
 void libfive_mesh_delete(libfive_mesh* m)

@@ -6,7 +6,7 @@
 // #include <iterator>
 
 #include "libfive.h"
-#include "libfive/solve/bounds.hpp"
+// #include "libfive/solve/bounds.hpp"
 #include "libfive/render/brep/mesh.hpp"
 
 #include "libfive/oracle/custom_function.hpp"

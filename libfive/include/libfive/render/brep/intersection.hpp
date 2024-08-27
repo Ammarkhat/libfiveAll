@@ -21,7 +21,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #include <Eigen/Eigen>
 #include <Eigen/StdVector>
 
-#include <boost/container/small_vector.hpp>
+// #include <boost/container/small_vector.hpp>
 
 namespace Kernel {
 
@@ -35,7 +35,8 @@ struct Intersection {
 
 template <size_t N>
 using IntersectionVec =
-        boost::container::small_vector<Intersection<N>, 4,
+        // boost::container::small_vector<Intersection<N>, 4,
+        std::vector<Intersection<N>,
             Eigen::aligned_allocator<Intersection<N>>>;
 
 }   // namespace Kernel
