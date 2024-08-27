@@ -15,6 +15,7 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #include "libfive/tree/tree.hpp"
 
 #include "libfive/eval/eval_point.hpp"
+#include "libfive/eval/eval_interval.hpp"
 #include "libfive/eval/eval_deriv.hpp"
 
 #include "libfive/render/brep/region.hpp"

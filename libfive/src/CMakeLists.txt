@@ -22,9 +22,7 @@ add_library(five SHARED
     eval/eval_point.cpp
     eval/tape.cpp
     eval/feature.cpp
-    eval/transformed_oracle.cpp
-    render/brep/xtree2.cpp
-    render/brep/xtree3.cpp
+    oracle/transformed_oracle.cpp
     render/brep/progress.cpp
     render/brep/mesh.cpp
     render/brep/neighbor_tables.cpp

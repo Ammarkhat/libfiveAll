@@ -1,6 +1,6 @@
 #pragma once
 
-#include "libfive/eval/oracle_storage.hpp"
+#include "libfive/oracle/oracle_storage.hpp"
 
 using namespace Kernel;
 

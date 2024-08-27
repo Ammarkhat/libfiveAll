@@ -8,6 +8,7 @@
 #include "libfive.h"
 // #include "libfive/solve/bounds.hpp"
 #include "libfive/render/brep/mesh.hpp"
+#include "libfive/render/brep/region.hpp"
 
 #include "libfive/oracle/custom_function.hpp"
 #include "libfive/oracle/oracle_custom_function.hpp"
@@ -15,10 +16,18 @@
 #include "gridBased.hpp"
 #include "gridBasedCircles.hpp"
 #include <unordered_map>
+
 // #include <bits/stdc++.h>
 // #include <iostream>
 // #include <chrono>
 using namespace std;
+
+#define BOOST_NO_EXCEPTIONS
+#include <boost/throw_exception.hpp>
+void boost::throw_exception(std::exception const & e){
+//do nothing
+}
+
 
 const char *OUTPUT_FILENAME = "exported.stl";
 // const float OUTPUT_RESOLUTION = 15.0;

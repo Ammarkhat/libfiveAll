@@ -11,7 +11,7 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #include <Eigen/Eigen>
 #include <Eigen/StdVector>
 
-#include <boost/container/small_vector.hpp>
+// #include <boost/container/small_vector.hpp>
 
 namespace Kernel {
 
@@ -35,7 +35,8 @@ bool inline Intersection<N>::operator==(const Intersection<N>& other) const
 
 template <size_t N>
 using IntersectionVec =
-        boost::container::small_vector<Intersection<N>, 4,
+        // boost::container::small_vector<Intersection<N>, 4,
+        std::vector<Intersection<N>,
             Eigen::aligned_allocator<Intersection<N>>>;
 
 }   // namespace Kernel

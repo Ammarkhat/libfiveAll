@@ -2,7 +2,7 @@
 
 #include <Eigen/Eigen>
 
-#include "libfive/tree/oracle_clause.hpp"
+#include "libfive/oracle/oracle_clause.hpp"
 #include "./oracle_custom_function.hpp"
 
 namespace Kernel {
