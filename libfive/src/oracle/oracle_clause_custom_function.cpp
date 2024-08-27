@@ -4,14 +4,14 @@
 using namespace Kernel;
 
 CustomFunctionOracleClause::CustomFunctionOracleClause(
-        std::function<float(float, float, float)> f, std::function<Eigen::Vector3f(float, float, float)> fd)
-    : f(f), fd(fd)
+        CustomFunctionWrapper *cfw)
+    : cfw(cfw)
 {
     // Nothing to do here
 }
 
 std::unique_ptr<Oracle> CustomFunctionOracleClause::getOracle() const
 {
-    auto o = new CustomFunctionOracle(f, fd);
+    auto o = new CustomFunctionOracle(cfw);
     return std::unique_ptr<Oracle>(o);
 }

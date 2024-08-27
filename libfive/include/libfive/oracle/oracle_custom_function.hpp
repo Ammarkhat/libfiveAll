@@ -6,10 +6,16 @@ using namespace Kernel;
 
 namespace Kernel {
 
+class CustomFunctionWrapper{
+    public:
+        virtual float f(float, float, float) = 0;
+        virtual Eigen::Vector3f fd(float, float, float) = 0;
+};
+
 class CustomFunctionOracle : public OracleStorage<>
 {
 public:
-    CustomFunctionOracle(std::function<float(float, float, float)> f, std::function<Eigen::Vector3f(float, float, float)> fd);
+    CustomFunctionOracle(CustomFunctionWrapper* cfw);
 
     void evalInterval(Interval::I &out) override;
     void evalPoint(float& out, size_t index=0) override;
@@ -30,8 +36,7 @@ public:
             boost::container::small_vector<Feature, 4>& out) override;
 
 protected:
-    std::function<float(float, float, float)> f;
-    std::function<Eigen::Vector3f(float, float, float)> fd;
+    CustomFunctionWrapper* cfw;
 };
 
 }   

@@ -3,14 +3,15 @@
 #include <algorithm>
 // #include <cstring>
 #include <iostream>
+#include <unordered_map>
 
 struct PixelData {
     std::vector<int> dims;
     double step;
     std::vector<double> min;
     std::vector<double> max;
-    std::vector<std::vector<int>> circles;
-    std::vector<std::vector<int>> secondaryCircles;
+    std::unordered_map<int, std::vector<short>> circles;
+    std::unordered_map<int, std::vector<short>> secondaryCircles;
 };
 
 struct Circle{
@@ -30,8 +31,8 @@ PixelData createPixelData(const std::vector<double>& box, int resolution, double
     int ry = static_cast<int>(std::ceil((max[1] - min[1]) / step));
 
     int datalen = rx * ry;
-    std::vector<std::vector<int>> circles(datalen, std::vector<int>());
-    std::vector<std::vector<int>> secondaryCircles(datalen, std::vector<int>());
+    std::unordered_map<int, std::vector<short>> circles;
+    std::unordered_map<int, std::vector<short>> secondaryCircles;
 
     PixelData voxels;
     voxels.dims = {rx, ry};
@@ -43,7 +44,7 @@ PixelData createPixelData(const std::vector<double>& box, int resolution, double
     return voxels;
 }
 
-void PixalizeCircles(const std::vector<Circle>& inputSpheres, PixelData& voxels, std::vector<std::vector<int>>& circles, double expansionAmount = 2) {
+void PixalizeCircles(const std::vector<Circle>& inputSpheres, PixelData& voxels, std::unordered_map<int, std::vector<short>>& circles, double expansionAmount = 2) {
     const std::vector<double>& min = voxels.min;
     const std::vector<double>& max = voxels.max;
     double step = voxels.step;
@@ -91,6 +92,9 @@ void PixalizeCircles(const std::vector<Circle>& inputSpheres, PixelData& voxels,
                 double x = vminx + i * step;
                 double y = vminy + j * step;
                 int n = i + j * rx;
+                 if (circles.find(n) == circles.end()) {
+                    circles[n] = std::vector<short>();
+                }
                 circles[n].push_back(si);
             }
         }

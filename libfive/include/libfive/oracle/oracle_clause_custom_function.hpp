@@ -10,13 +10,12 @@ namespace Kernel {
 class CustomFunctionOracleClause : public OracleClause
 {
 public:
-    CustomFunctionOracleClause(std::function<float(float, float, float)> f, std::function<Eigen::Vector3f(float, float, float)> fd);
+    CustomFunctionOracleClause(CustomFunctionWrapper *cfw);
     std::unique_ptr<Oracle> getOracle() const override;
     std::string name() const { return "CustomFunctionOracleClause"; }
 
 protected:
-    std::function<float(float, float, float)> f;
-    std::function<Eigen::Vector3f(float, float, float)> fd;
+    CustomFunctionWrapper *cfw;
 };
 
 }

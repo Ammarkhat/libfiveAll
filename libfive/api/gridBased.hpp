@@ -3,6 +3,7 @@
 #include <algorithm>
 // #include <cstring>
 #include <iostream>
+#include <unordered_map>
 //export const bbox = [-150, -130, -150, 150, 150, 150];
 
 struct VoxelData {
@@ -10,8 +11,8 @@ struct VoxelData {
     double step;
     std::vector<double> min;
     std::vector<double> max;
-    std::vector<std::vector<int>> spheres;
-    std::vector<std::vector<int>> secondarySpheres;
+    std::unordered_map<int, std::vector<short>> spheres;
+    std::unordered_map<int, std::vector<short>> secondarySpheres;
 };
 
 struct Sphere{
@@ -34,8 +35,8 @@ VoxelData createVoxelData(const std::vector<double>& box, int resolution, double
     int rxy = rx * ry;
 
     int datalen = rx * ry * rz;
-    std::vector<std::vector<int>> spheres(datalen, std::vector<int>());
-    std::vector<std::vector<int>> secondarySpheres(datalen, std::vector<int>());
+    std::unordered_map<int, std::vector<short>> spheres;
+    std::unordered_map<int, std::vector<short>> secondarySpheres;
 
     VoxelData voxels;
     voxels.dims = {rx, ry, rz};
@@ -47,7 +48,7 @@ VoxelData createVoxelData(const std::vector<double>& box, int resolution, double
     return voxels;
 }
 
-void voxelizeSpheres(const std::vector<Sphere>& inputSpheres, VoxelData& voxels, std::vector<std::vector<int>>& spheres, double expansionAmount = 2) {
+void voxelizeSpheres(const std::vector<Sphere>& inputSpheres, VoxelData& voxels, std::unordered_map<int, std::vector<short>>& spheres, double expansionAmount = 2) {
     const std::vector<double>& min = voxels.min;
     const std::vector<double>& max = voxels.max;
     double step = voxels.step;
@@ -108,6 +109,9 @@ void voxelizeSpheres(const std::vector<Sphere>& inputSpheres, VoxelData& voxels,
                     double y = vminy + j * step;
                     double z = vminz + k * step;
                     int n = i + j * rx + k * rxy;
+                    if (spheres.find(n) == spheres.end()) {
+                        spheres[n] = std::vector<short>();
+                    }
                     spheres[n].push_back(si);
                 }
             }

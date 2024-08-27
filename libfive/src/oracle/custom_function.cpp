@@ -5,9 +5,9 @@
 
 namespace Kernel {
 
-Tree customFunction(std::function<float(float, float, float)> f, std::function<Eigen::Vector3f(float, float, float)> fd){
+Tree customFunction(CustomFunctionWrapper* cfw){
     Tree t(std::unique_ptr<CustomFunctionOracleClause>(
-            new CustomFunctionOracleClause(f, fd)));
+            new CustomFunctionOracleClause(cfw)));
     return t;
 }
 

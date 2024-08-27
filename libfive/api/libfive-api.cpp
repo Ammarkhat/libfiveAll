@@ -14,7 +14,7 @@
 #include <Eigen/Eigen>
 #include "gridBased.hpp"
 #include "gridBasedCircles.hpp"
-
+#include <unordered_map>
 // #include <bits/stdc++.h>
 // #include <iostream>
 // #include <chrono>
@@ -353,7 +353,7 @@ int parseNode(Node* parentNode, vector<string> words, int i){
     int nextPosition = i;
     Node node;
     string word = words[i];
-    if(word == "union" || word == "intersection" || word == "difference" || word == "blend" || word == "spheres"){
+    if(word == "union" || word == "intersection" || word == "difference" || word == "blend" || word == "spheres" || word == "revolveCircles"){
         node.type = word;
         nextPosition = parseNode(&node, words, i+2);
         parentNode->children.push_back(node);
@@ -491,6 +491,13 @@ int parseNode(Node* parentNode, vector<string> words, int i){
         node.data.push_back(stod(words[i+3]));
         parentNode->children.push_back(node);
         nextPosition = parseNode(parentNode, words, i+4);
+    }else if(word == "cc"){
+        node.type = "circle";
+        node.data.push_back(stod(words[i+1]));
+        node.data.push_back(stod(words[i+2]));
+        node.data.push_back(stod(words[i+3]));
+        parentNode->children.push_back(node);
+        nextPosition = parseNode(parentNode, words, i+4);
     }else if(word == ")"){
         nextPosition = i + 1;
     }else{
@@ -500,129 +507,221 @@ int parseNode(Node* parentNode, vector<string> words, int i){
     }
     return nextPosition;
 }
-Tree buildBruteForceSpheres(std::vector<Sphere>& spheresArray){
-  std::function<float(float, float, float)> f = [&spheresArray](float x, float y, float z) {
-    float totalD = 1000000;
-    for (size_t i = 0; i < spheresArray.size(); i++)
-    {
-      auto s = spheresArray[i];
-      auto d = sqrt((x-s.cx) * (x-s.cx) + (y-s.cy) * (y-s.cy) + (z-s.cz) * (z-s.cz)) - s.radius;
-      if(d < totalD){
-        totalD = d;
-      }
-    }
-    return totalD;
-  };
-    std::function<Eigen::Vector3f(float, float, float)> fd = [&spheresArray](float x, float y, float z) {
-    float totalD = 1000000;
-    int minIndex = -1;
-    for (size_t i = 0; i < spheresArray.size(); i++)
-    {
-      auto s = spheresArray[i];
-      auto d = sqrt((x-s.cx) * (x-s.cx) + (y-s.cy) * (y-s.cy) + (z-s.cz) * (z-s.cz)) - s.radius;
-      if(d < totalD){
-        totalD = d;
-        minIndex = i;
-      }
-    }
-    auto s = spheresArray[minIndex];
-    auto v = Eigen::Vector3f{x-s.cx,y-s.cy,z-s.cz};
-    return v;
-  };
-  return Tree(customFunction(f, fd));
-}
 
-Tree buildGridBasedSpheres(std::vector<Sphere>& spheresArray){
-
-  // ************** grid based **********************************
-  // auto t1 = std::chrono::high_resolution_clock::now();
-  std::vector<double> box {-150, -130, -150, 150, 150, 150};
-  auto voxelData = createVoxelData(box, 150, 1.51);
-  std::vector<std::vector<int>>& innerSpheres = voxelData.spheres;
-  voxelizeSpheres(spheresArray, voxelData, innerSpheres, 2);
-
-  std::vector<std::vector<int>>& secondarySpheres = voxelData.secondarySpheres;
-  voxelizeSpheres(spheresArray, voxelData, secondarySpheres, 20);
-  // auto t2 = std::chrono::high_resolution_clock::now();
-  // std::cout << "grid construction time (s): " << (t2 - t1).count() / 1.0e9 << std::endl;
-
-  double vminx = voxelData.min[0];
-  double vminy = voxelData.min[1];
-  double vminz = voxelData.min[2];
-  double step = voxelData.step;
-  double invStep = 1.0 / step;
-  int rx = voxelData.dims[0];
-  int ry = voxelData.dims[1];
-  int rxy = rx * ry;
-
-  std::vector<int> spheresIndices;
-  for( int i = 0; i < spheresArray.size(); i++ )
-    spheresIndices.push_back( i );
-
-  int total = 0;
-  int allSpheres = 0;
-  int someSpheres = 0;
-
-  std::function<float(float, float, float)> f = [&spheresArray, &voxelData, rx, rxy, step, vminx, vminy, vminz, invStep, &spheresIndices](float x, float y, float z) {
-    // Precompute the indices and distance bounds
-    int i = static_cast<int>(std::floor((x - vminx) * invStep));
-    int j = static_cast<int>(std::floor((y - vminy) * invStep));
-    int k = static_cast<int>(std::floor((z - vminz) * invStep));
-    int n = i + j * rx + k * rxy;
-
-    float totalD = 1000000.0f;  // Large initial value
-    const auto& selectedSpheres = voxelData.spheres[n].empty() ? voxelData.secondarySpheres[n] : voxelData.spheres[n];
-    // std::cout << selectedSpheres.size() << " ";
-
-    // Reference to the sphere array to avoid multiple lookups
-    const auto& spheres = selectedSpheres.empty() ? spheresIndices : selectedSpheres;
-
-    // Calculate the minimum distance
-    for (const auto& si : spheres) {
-        const auto& s = spheresArray[si];
-        float dx = x - s.cx;
-        float dy = y - s.cy;
-        float dz = z - s.cz;
-        float dist = sqrt(dx * dx + dy * dy + dz * dz) - s.radius;
-        totalD = std::min(totalD, dist);
-    }
-
-    return totalD;
-  };
-  std::function<Eigen::Vector3f(float, float, float)> fd = [&spheresArray, &voxelData, rx, rxy, step, vminx, vminy, vminz, invStep, &spheresIndices](float x, float y, float z) {
-      // Precompute the indices and distance bounds
-      int i = static_cast<int>(std::floor((x - vminx) * invStep));
-      int j = static_cast<int>(std::floor((y - vminy) * invStep));
-      int k = static_cast<int>(std::floor((z - vminz) * invStep));
-      int n = i + j * rx + k * rxy;
-
-      float minDist = 1000000.0f;  // Large initial value
-      int minIndex = -1;
-
-      const auto& selectedSpheresIndices = voxelData.spheres[n].empty() ? voxelData.secondarySpheres[n] : voxelData.spheres[n];
-
-      const auto& spheresToCheck = selectedSpheresIndices.empty() ? spheresIndices : selectedSpheresIndices;
-
-      // Iterate over the relevant spheres
-      for (const auto si : spheresToCheck) {
-          const auto& s = spheresArray[si];
-          float dx = x - s.cx;
-          float dy = y - s.cy;
-          float dz = z - s.cz;
-          float dist = std::sqrt(dx * dx + dy * dy + dz * dz) - s.radius;
-          if (dist < minDist) {
-              minDist = dist;
-              minIndex = si;
+class BruteForceSpheresFunction: public CustomFunctionWrapper{
+    public:
+      std::vector<Sphere> spheresArray;
+      virtual float f(float x, float y, float z) {
+         float totalD = 1000000;
+        // std::cout << "spheresArray.size: " << this->spheresArray.size() << std::endl;
+        for (size_t i = 0; i < this->spheresArray.size(); i++)
+        {
+          auto s = this->spheresArray[i];
+          auto d = sqrt((x-s.cx) * (x-s.cx) + (y-s.cy) * (y-s.cy) + (z-s.cz) * (z-s.cz)) - s.radius;
+          if(d < totalD){
+            totalD = d;
           }
+        }
+        return totalD;
+      }
+      virtual Eigen::Vector3f fd(float x, float y, float z) {
+        float totalD = 1000000;
+        int minIndex = -1;
+        // std::cout << "spheresArray.size: " << this->spheresArray.size() << std::endl;
+        for (size_t i = 0; i < this->spheresArray.size(); i++)
+        {
+          auto s = this->spheresArray[i];
+          auto d = sqrt((x-s.cx) * (x-s.cx) + (y-s.cy) * (y-s.cy) + (z-s.cz) * (z-s.cz)) - s.radius;
+          if(d < totalD){
+            totalD = d;
+            minIndex = i;
+          }
+        }
+        auto s = this->spheresArray[minIndex];
+        auto v = Eigen::Vector3f{x-s.cx,y-s.cy,z-s.cz};
+        return v;
       }
 
-      // Calculate the vector based on the sphere with the minimum distance
-      const auto& s = spheresArray[minIndex];
-      Eigen::Vector3f v(x - s.cx, y - s.cy, z - s.cz);
-      return v;
-  };
-  return Tree(customFunction(f, fd));
-}
+};
+
+class GridBasedCFW: public CustomFunctionWrapper{
+    public:
+    double vminx;
+    double vminy;
+    double vminz;
+    double step;
+    double invStep;
+    int rx;
+    int ry;
+    int rxy;
+    VoxelData voxelData;
+    std::vector<short> spheresIndices;
+    std::vector<Sphere> spheresArray;
+
+    GridBasedCFW(std::vector<Sphere>& spheresArray): spheresArray(spheresArray){
+      // auto t1 = std::chrono::high_resolution_clock::now();
+      std::vector<double> box {-150, -130, -150, 150, 150, 150};
+      voxelData = createVoxelData(box, 150, 1.51);
+      std::unordered_map<int, std::vector<short>>& innerSpheres = voxelData.spheres;
+      voxelizeSpheres(spheresArray, voxelData, innerSpheres, 2);
+
+      std::unordered_map<int, std::vector<short>>& secondarySpheres = voxelData.secondarySpheres;
+      voxelizeSpheres(spheresArray, voxelData, secondarySpheres, 20);
+      // auto t2 = std::chrono::high_resolution_clock::now();
+      // std::cout << "grid construction time (s): " << (t2 - t1).count() / 1.0e9 << std::endl;
+
+      vminx = voxelData.min[0];
+      vminy = voxelData.min[1];
+      vminz = voxelData.min[2];
+      step = voxelData.step;
+      invStep = 1.0 / step;
+      rx = voxelData.dims[0];
+      ry = voxelData.dims[1];
+      rxy = rx * ry;
+
+      for( int i = 0; i < spheresArray.size(); i++ )
+        spheresIndices.push_back( (short)i );
+    }
+      virtual float f(float x, float y, float z) {
+        // Precompute the indices and distance bounds
+        int i = static_cast<int>(std::floor((x - vminx) * invStep));
+        int j = static_cast<int>(std::floor((y - vminy) * invStep));
+        int k = static_cast<int>(std::floor((z - vminz) * invStep));
+        int n = i + j * rx + k * rxy;
+
+        float totalD = 1000000.0f;  // Large initial value
+        const auto& spheres = voxelData.spheres.find(n) != voxelData.spheres.end() ? voxelData.spheres[n] : (
+          voxelData.secondarySpheres.find(n) != voxelData.secondarySpheres.end() ? voxelData.secondarySpheres[n] : spheresIndices);
+
+        // Calculate the minimum distance
+        for (const auto& si : spheres) {
+            const auto& s = spheresArray[si];
+            float dx = x - s.cx;
+            float dy = y - s.cy;
+            float dz = z - s.cz;
+            float dist = sqrt(dx * dx + dy * dy + dz * dz) - s.radius;
+            totalD = std::min(totalD, dist);
+        }
+
+        return totalD;
+      }
+      virtual Eigen::Vector3f fd(float x, float y, float z) {
+                // Precompute the indices and distance bounds
+        int i = static_cast<int>(std::floor((x - vminx) * invStep));
+        int j = static_cast<int>(std::floor((y - vminy) * invStep));
+        int k = static_cast<int>(std::floor((z - vminz) * invStep));
+        int n = i + j * rx + k * rxy;
+
+        float minDist = 1000000.0f;  // Large initial value
+        int minIndex = -1;
+
+        const auto& spheresToCheck = voxelData.spheres.find(n) != voxelData.spheres.end() ? voxelData.spheres[n] : (
+          voxelData.secondarySpheres.find(n) != voxelData.secondarySpheres.end() ? voxelData.secondarySpheres[n] : spheresIndices);
+
+        // Iterate over the relevant spheres
+        for (const auto si : spheresToCheck) {
+            const auto& s = spheresArray[si];
+            float dx = x - s.cx;
+            float dy = y - s.cy;
+            float dz = z - s.cz;
+            float dist = std::sqrt(dx * dx + dy * dy + dz * dz) - s.radius;
+            if (dist < minDist) {
+                minDist = dist;
+                minIndex = si;
+            }
+        }
+
+        // Calculate the vector based on the sphere with the minimum distance
+        const auto& s = spheresArray[minIndex];
+        Eigen::Vector3f v(x - s.cx, y - s.cy, z - s.cz);
+        return v;
+      }
+};
+
+
+class GridBasedCirclesCFW: public CustomFunctionWrapper{
+    public:
+    double vminx;
+    double vminy;
+    double step;
+    double invStep;
+    int rx;
+    int ry;
+    PixelData voxelData;
+    std::vector<short> spheresIndices;
+    std::vector<Circle> circlesArray;
+
+    GridBasedCirclesCFW(std::vector<Circle>& circlesArray): circlesArray(circlesArray){
+      std::vector<double> box {-150, -130, 150, 150};
+       voxelData = createPixelData(box, 150, 1.51);
+      std::unordered_map<int, std::vector<short>>& innerSpheres = voxelData.circles;
+      PixalizeCircles(circlesArray, voxelData, innerSpheres, 2);
+
+      std::unordered_map<int, std::vector<short>>& secondarySpheres = voxelData.secondaryCircles;
+      PixalizeCircles(circlesArray, voxelData, secondarySpheres, 20);
+
+      vminx = voxelData.min[0];
+      vminy = voxelData.min[1];
+      step = voxelData.step;
+      invStep = 1.0 / step;
+      rx = voxelData.dims[0];
+      ry = voxelData.dims[1];
+
+      for( int i = 0; i < circlesArray.size(); i++ )
+        spheresIndices.push_back( (short)i );
+    }
+      virtual float f(float x, float y, float z) {
+        // Precompute the indices and distance bounds
+        int i = static_cast<int>(std::floor((x - vminx) * invStep));
+        int j = static_cast<int>(std::floor((y - vminy) * invStep));
+        int n = i + j * rx;
+
+        float totalD = 1000000.0f;  // Large initial value
+        const auto& spheres = voxelData.circles.find(n) != voxelData.circles.end() ? voxelData.circles[n] : (
+          voxelData.secondaryCircles.find(n) != voxelData.secondaryCircles.end() ? voxelData.secondaryCircles[n] : spheresIndices);
+
+        // Calculate the minimum distance
+        for (const auto& si : spheres) {
+            const auto& s = circlesArray[si];
+            float dx = x - s.cx;
+            float dy = y - s.cy;
+            float dist = sqrt(dx * dx + dy * dy) - s.radius;
+            totalD = std::min(totalD, dist);
+        }
+
+        return totalD;
+      }
+      virtual Eigen::Vector3f fd(float x, float y, float z) {
+                // Precompute the indices and distance bounds
+        int i = static_cast<int>(std::floor((x - vminx) * invStep));
+        int j = static_cast<int>(std::floor((y - vminy) * invStep));
+        int n = i + j * rx;
+
+        float minDist = 1000000.0f;  // Large initial value
+        int minIndex = -1;
+
+        const auto& spheresToCheck = voxelData.circles.find(n) != voxelData.circles.end() ? voxelData.circles[n] : (
+          voxelData.secondaryCircles.find(n) != voxelData.secondaryCircles.end() ? voxelData.secondaryCircles[n] : spheresIndices);
+
+        // Iterate over the relevant spheres
+        for (const auto si : spheresToCheck) {
+            const auto& s = circlesArray[si];
+            float dx = x - s.cx;
+            float dy = y - s.cy;
+            float dist = std::sqrt(dx * dx + dy * dy) - s.radius;
+            if (dist < minDist) {
+                minDist = dist;
+                minIndex = si;
+            }
+        }
+
+        // Calculate the vector based on the sphere with the minimum distance
+        const auto& s = circlesArray[minIndex];
+        Eigen::Vector3f v(x - s.cx, y - s.cy, 0);
+        return v;
+      }
+};
+
 
 Tree buildTree(Node& root) {
     if(root.type == "union"){
@@ -767,6 +866,8 @@ Tree buildTree(Node& root) {
       return capsule(root.data[0], root.data[1], {root.data[2], root.data[3], root.data[4]}, {root.data[5], root.data[6], root.data[7]});
     } else if(root.type == "torus"){
       return torus(root.data[0], root.data[1], root.data[2]);
+    } else if(root.type == "circle"){
+      return circle(root.data[0], {root.data[1], root.data[2]});
     } else if(root.type == "triangle"){
       return triangle({root.data[0], root.data[1]}, {root.data[2], root.data[3]}, {root.data[4], root.data[5]});
     } else if(root.type == "scale"){
@@ -815,8 +916,20 @@ Tree buildTree(Node& root) {
         Sphere sp1{(float)sph.data[0], (float)sph.data[1], (float)sph.data[2], (float)sph.data[3]};
         spheresArray.push_back(sp1);
       }
-      // return buildGridBasedSpheres(spheresArray);
-      return buildBruteForceSpheres(spheresArray);
+
+      auto cf = new GridBasedCFW(spheresArray);
+      return Tree(customFunction(cf));
+     } else if(root.type == "revolveCircles"){
+      std::vector<Circle> circleArray;
+      for (size_t i = 0; i < root.children.size(); i++)
+      {
+        auto sph = root.children[i];
+        Circle sp1{(float)sph.data[0], (float)sph.data[1], (float)sph.data[2]};
+        circleArray.push_back(sp1);
+      }
+
+      auto cf = new GridBasedCirclesCFW(circleArray);
+      return revolve_y(Tree(customFunction(cf)), 0);
     } else if(root.children.size() > 0){
       return buildTree(root.children[0]);
     }
@@ -844,8 +957,32 @@ struct MeshDto {
 MeshDto meshImplicitFunction(std::string implicitString, float resolution, float maxError, double minx, double miny, double minz, double maxx, double maxy, double maxz) {
 
   // std::cout << "Tree: " << libfive_tree_print(&out) << "\n";
-  auto out_parse = parseImplicitString(implicitString);
-  
+   auto out_parse = parseImplicitString(implicitString);
+  // std::vector<Sphere> spheresArray;
+  // Sphere sp1{10, 0, 0, 0};
+  // spheresArray.push_back(sp1);
+  // Sphere sp2{10, 20, 0, 0};
+  // spheresArray.push_back(sp2);
+  // Sphere sp3{10, 0, 20, 0};
+  // spheresArray.push_back(sp3);
+  // Sphere sp4{10, 0, 0, 20};
+  // spheresArray.push_back(sp4);
+  // auto out_parse = buildGridBasedSpheres(spheresArray);
+
+  // vector<string> words = splitBySpaces(implicitString);
+  // Node root;
+  // root.type="root";
+  // parseNode(&root, words, 0);
+  // std::vector<Sphere> spheresArray;
+  // for (size_t i = 0; i < root.children[0].children.size(); i++)
+  // {
+  //   auto sph = root.children[0].children[i];
+  //   Sphere sp1{(float)sph.data[0], (float)sph.data[1], (float)sph.data[2], (float)sph.data[3]};
+  //   spheresArray.push_back(sp1);
+  // }
+  // // auto out_parse = buildGridBasedSpheres(spheresArray);
+  // auto out_parse = buildBruteForceSpheres(spheresArray);
+
   // The value for `max_err` is cargo-culted from its default value.
   Region<3> bds({minx, miny, minz}, {maxx, maxy, maxz});
   auto bds_box = box_mitered({minx+1, miny+1, minz+1}, {maxx-1, maxy-1, maxz-1});

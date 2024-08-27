@@ -3,8 +3,8 @@
 
 using namespace Kernel;
 
-CustomFunctionOracle::CustomFunctionOracle(std::function<float(float, float, float)> f, std::function<Eigen::Vector3f(float, float, float)> fd)
-    : f(f), fd(fd)
+CustomFunctionOracle::CustomFunctionOracle(CustomFunctionWrapper* cfw)
+    : cfw(cfw)
 {
 }
 
@@ -27,7 +27,7 @@ void CustomFunctionOracle::evalInterval(Interval::I& out)
 void CustomFunctionOracle::evalPoint(float& out, size_t index)
 {
     const auto pt = points.col(index);
-    out = f(pt.x(), pt.y(), pt.z());
+    out = cfw->f(pt.x(), pt.y(), pt.z());
 
     // Initialize out to an invalid value, so we can check it afterwards
     // out = -1;
@@ -57,7 +57,7 @@ void CustomFunctionOracle::evalDerivs(
                          3, 1, true> out, size_t index)
 {
     const auto pt = points.col(index);
-    out = fd(pt.x(), pt.y(), pt.z());
+    out = cfw->fd(pt.x(), pt.y(), pt.z());
 
     // out = Eigen::Vector3f(0,0,0);
     // const float EPSILON = 1e-6;
