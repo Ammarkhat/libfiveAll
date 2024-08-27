@@ -1,46 +1,52 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
+
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #include <boost/numeric/interval.hpp>
 
 #include "libfive/eval/eval_point.hpp"
+#include "libfive/eval/deck.hpp"
+#include "libfive/eval/tape.hpp"
 
 namespace Kernel {
 
-PointEvaluator::PointEvaluator(std::shared_ptr<Tape> t)
-    : PointEvaluator(t, std::map<Tree::Id, float>())
+PointEvaluator::PointEvaluator(const Tree& root)
+    : PointEvaluator(std::make_shared<Deck>(root))
 {
     // Nothing to do here
 }
 
 PointEvaluator::PointEvaluator(
-        std::shared_ptr<Tape> t, const std::map<Tree::Id, float>& vars)
-    : BaseEvaluator(t, vars), f(tape->num_clauses + 1, 1)
+        const Tree& root, const std::map<Tree::Id, float>& vars)
+    : PointEvaluator(std::make_shared<Deck>(root), vars)
+{
+    // Nothing to do here
+}
+
+PointEvaluator::PointEvaluator(std::shared_ptr<Deck> d)
+    : PointEvaluator(d, std::map<Tree::Id, float>())
+{
+    // Nothing to do here
+}
+
+PointEvaluator::PointEvaluator(
+        std::shared_ptr<Deck> d, const std::map<Tree::Id, float>& vars)
+    : BaseEvaluator(d, vars), f(d->num_clauses + 1, 1)
 {
     // Unpack variables into result array
-    for (auto& v : t->vars.right)
+    for (auto& v : d->vars.right)
     {
         auto var = vars.find(v.first);
         f(v.second) = (var != vars.end()) ? var->second : 0;
     }
 
     // Unpack constants into result array
-    for (auto& c : tape->constants)
+    for (auto& c : deck->constants)
     {
         f(c.first) = c.second;
     }
@@ -48,23 +54,43 @@ PointEvaluator::PointEvaluator(
 
 float PointEvaluator::eval(const Eigen::Vector3f& pt)
 {
-    f(tape->X) = pt.x();
-    f(tape->Y) = pt.y();
-    f(tape->Z) = pt.z();
+    return eval(pt, deck->tape);
+}
 
-    for (auto& o : tape->oracles)
+float PointEvaluator::eval(const Eigen::Vector3f& pt,
+                           std::shared_ptr<Tape> tape)
+{
+    assert(tape.get());
+
+    f(deck->X) = pt.x();
+    f(deck->Y) = pt.y();
+    f(deck->Z) = pt.z();
+
+    for (auto& o : deck->oracles)
     {
         o->set(pt);
     }
 
-    return f(tape->rwalk(*this));
+    deck->bindOracles(tape);
+    auto index = tape->rwalk(*this);
+    deck->unbindOracles();
+
+    return f(index);
 }
 
-float PointEvaluator::evalAndPush(const Eigen::Vector3f& pt)
+std::pair<float, Tape::Handle> PointEvaluator::evalAndPush(
+        const Eigen::Vector3f& pt)
 {
-    auto out = eval(pt);
-    tape->push([&](Opcode::Opcode op, Clause::Id /* id */,
-                  Clause::Id a, Clause::Id b)
+    return evalAndPush(pt, deck->tape);
+}
+
+std::pair<float, Tape::Handle> PointEvaluator::evalAndPush(
+        const Eigen::Vector3f& pt, Tape::Handle tape)
+{
+    auto out = eval(pt, tape);
+    auto p = Tape::push(tape, *deck,
+        [&](Opcode::Opcode op, Clause::Id /* id */,
+            Clause::Id a, Clause::Id b)
     {
         // For min and max operations, we may only need to keep one branch
         // active if it is decisively above or below the other branch.
@@ -100,20 +126,15 @@ float PointEvaluator::evalAndPush(const Eigen::Vector3f& pt)
         }
         return Tape::KEEP_ALWAYS;
     }, Tape::SPECIALIZED);
-    return out;
-}
-
-float PointEvaluator::baseEval(const Eigen::Vector3f& pt)
-{
-    return tape->baseEval<PointEvaluator, float>(*this, pt);
+    return std::make_pair(out, std::move(p));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 bool PointEvaluator::setVar(Tree::Id var, float value)
 {
-    auto v = tape->vars.right.find(var);
-    if (v != tape->vars.right.end())
+    auto v = deck->vars.right.find(var);
+    if (v != deck->vars.right.end())
     {
         bool changed = f(v->second) != value;
         f.row(v->second) = value;
@@ -228,7 +249,7 @@ void PointEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
             break;
 
         case Opcode::ORACLE:
-            tape->oracles[a_]->evalPoint(out);
+            deck->oracles[a_]->evalPoint(out);
             break;
 
         case Opcode::INVALID:
@@ -245,5 +266,3 @@ void PointEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
 }
 
 }   // namespace Kernel
-
-

@@ -2,19 +2,9 @@
 libfive: a CAD kernel for modeling with implicit functions
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 // #include <iostream>
 // #include <fstream>
@@ -23,6 +13,9 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "libfive/tree/opcode.hpp"
 #include "libfive/tree/tree.hpp"
+
+#include "libfive/eval/eval_point.hpp"
+#include "libfive/eval/eval_deriv.hpp"
 
 #include "libfive/render/brep/region.hpp"
 // #include "libfive/render/brep/contours.hpp"
@@ -35,6 +28,26 @@ void libfive_mesh_delete(libfive_mesh* m)
     delete [] m->verts;
     delete [] m->tris;
     delete m;
+}
+
+void libfive_mesh_coords_delete(libfive_mesh_coords* m)
+{
+    delete [] m->verts;
+    delete [] m->coord_indices;
+    delete m;
+}
+
+void libfive_pixels_delete(libfive_pixels* m)
+{
+    delete [] m->pixels;
+    delete m;
+}
+
+void libfive_vars_delete(libfive_vars* vs)
+{
+    delete [] vs->vars;
+    delete [] vs->values;
+    delete vs;
 }
 
 int libfive_opcode_enum(const char* op)
@@ -80,18 +93,31 @@ libfive_tree libfive_tree_constant_vars(libfive_tree t)
     return new Tree(t->makeVarsConstant());
 }
 
+static bool opcode_is_valid(int op, size_t expected_args)
+{
+    return op >= 0 &&
+           op < Opcode::LAST_OP &&
+           Opcode::args(Opcode::Opcode(op)) == expected_args;
+}
+
 libfive_tree libfive_tree_nonary(int op)
 {
-    return new Tree(Opcode::Opcode(op));
+    return opcode_is_valid(op, 0)
+        ? new Tree(Opcode::Opcode(op))
+        : nullptr;
 }
 
 libfive_tree libfive_tree_unary(int op, libfive_tree a)
 {
-    return new Tree(Opcode::Opcode(op), *a);
+    return (opcode_is_valid(op, 1) && a != nullptr)
+        ? new Tree(Opcode::Opcode(op), *a)
+        : nullptr;
 }
 libfive_tree libfive_tree_binary(int op, libfive_tree a, libfive_tree b)
 {
-    return new Tree(Opcode::Opcode(op), *a, *b);
+    return (opcode_is_valid(op, 2) && a != nullptr && b != nullptr)
+        ? new Tree(Opcode::Opcode(op), *a, *b)
+        : nullptr;
 }
 
 const void* libfive_tree_id(libfive_tree t)
@@ -142,13 +168,13 @@ libfive_tree libfive_tree_remap(libfive_tree p, libfive_tree x, libfive_tree y, 
 
 float libfive_tree_eval_f(libfive_tree t, libfive_vec3 p)
 {
-    PointEvaluator e(std::make_shared<Tape>(*t));
+    PointEvaluator e(*t);
     return e.eval({p.x, p.y, p.z});
 }
 
 libfive_interval libfive_tree_eval_r(libfive_tree t, libfive_region3 r)
 {
-    IntervalEvaluator e(std::make_shared<Tape>(*t));
+    IntervalEvaluator e(*t);
     auto i = e.eval({r.X.lower, r.Y.lower, r.Z.lower},
                     {r.X.upper, r.Y.upper, r.Z.upper});
     return {i.lower(), i.upper()};
@@ -156,7 +182,7 @@ libfive_interval libfive_tree_eval_r(libfive_tree t, libfive_region3 r)
 
 libfive_vec3 libfive_tree_eval_d(libfive_tree t, libfive_vec3 p)
 {
-    DerivEvaluator e(std::make_shared<Tape>(*t));
+    DerivEvaluator e(*t);
     auto v = e.deriv({p.x, p.y, p.z});
     return {v.x(), v.y(), v.z()};
 }

@@ -2,19 +2,9 @@
 libfive: a CAD kernel for modeling with implicit functions
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #include <algorithm>
 // #include <fstream>
@@ -27,7 +17,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "libfive/tree/cache.hpp"
 #include "libfive/tree/archive.hpp"
-#include "libfive/tree/transformed_oracle_clause.hpp"
+#include "libfive/oracle/transformed_oracle_clause.hpp"
 
 namespace Kernel {
 
@@ -134,14 +124,14 @@ std::list<Tree> Tree::ordered() const
     return out;
 }
 
-std::vector<uint8_t> Tree::serialize() const
+void Tree::serialize(std::ostream& out) const
 {
-    return Archive(*this).serialize();
+    return Archive(*this).serialize(out);
 }
 
-Tree Tree::deserialize(const std::vector<uint8_t>& data)
+Tree Tree::deserialize(std::istream& in)
 {
-    auto s = Archive::deserialize(data).shapes;
+    auto s = Archive::deserialize(in).shapes;
     assert(s.size() == 1);
     return s.front().tree;
 }
@@ -201,6 +191,16 @@ Tree Tree::remap(std::map<Id, Tree> m) const
     // If this Tree was remapped, then return it; otherwise return itself
     auto r = m.find(id());
     return r == m.end() ? *this : Tree(r->second);
+}
+
+Tree Tree::lhs() const
+{
+    return Tree(ptr->lhs);
+}
+
+Tree Tree::rhs() const
+{
+    return Tree(ptr->rhs);
 }
 
 Tree Tree::makeVarsConstant() const

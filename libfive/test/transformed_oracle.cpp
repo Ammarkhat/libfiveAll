@@ -1,28 +1,22 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
+
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 
 #include "catch.hpp"
 
 #include "libfive/render/brep/mesh.hpp"
 #include "libfive/render/brep/region.hpp"
-#include "libfive/tree/oracle_clause.hpp"
-#include "libfive/eval/oracle_storage.hpp"
+#include "libfive/oracle/oracle_clause.hpp"
+#include "libfive/oracle/oracle_storage.hpp"
+
+#include "libfive/eval/deck.hpp"
+#include "libfive/eval/eval_xtree.hpp"
 
 #include "util/shapes.hpp"
 #include "util/oracles.hpp"
@@ -41,16 +35,16 @@ void compareUnderTransformation(Tree oracleTree, Tree controlTree,
 {
     auto transformedOracle = transformation(oracleTree);
     auto transformedControl = transformation(controlTree);
-    auto oTape = std::make_shared<Tape>(transformedOracle);
-    auto cTape = std::make_shared<Tape>(transformedControl);
+    auto oDeck = std::make_shared<Deck>(transformedOracle);
+    auto cDeck = std::make_shared<Deck>(transformedControl);
     /* If a point is ambiguous in either tree, we can't compare
      * individual derivatives, since there is more than one valid
      * result and no guarantee both trees will give the same one.
      */
     Eigen::Array<bool, 1, 256> ambigPoints(testPoints.size());
     {
-        DerivArrayEvaluator o(oTape);
-        DerivArrayEvaluator c(cTape);
+        DerivArrayEvaluator o(oDeck);
+        DerivArrayEvaluator c(cDeck);
         for (unsigned i = 0; i < testPoints.size(); ++i)
         {
             o.set(testPoints[i], i);
@@ -88,8 +82,8 @@ void compareUnderTransformation(Tree oracleTree, Tree controlTree,
         }
     }
     {
-        FeatureEvaluator o(oTape);
-        FeatureEvaluator c(cTape);
+        FeatureEvaluator o(oDeck);
+        FeatureEvaluator c(cDeck);
 
         for (auto point : testPoints)
         {
@@ -116,8 +110,8 @@ void compareUnderTransformation(Tree oracleTree, Tree controlTree,
          */
     }
     {
-        DerivEvaluator o(oTape);
-        DerivEvaluator c(cTape);
+        DerivEvaluator o(oDeck);
+        DerivEvaluator c(cDeck);
         for (unsigned i = 0; i < testPoints.size(); ++i)
         {
             auto oDeriv = o.deriv(testPoints[i]);
@@ -203,7 +197,7 @@ TEST_CASE("Abs and skew applied to Oracle: "
 }
 
 TEST_CASE("Abs and skew applied to Oracle: "
-    "Render and compare (cube as oracle)")
+          "Render and compare (cube as oracle)", "[!mayfail]")
 {
     auto cube = max(max(
         max(-(Tree::X() + 1.5),

@@ -1,49 +1,64 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
+
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #include "libfive/eval/eval_deriv.hpp"
+#include "libfive/eval/tape.hpp"
+#include "libfive/eval/deck.hpp"
 
 namespace Kernel {
 
-DerivEvaluator::DerivEvaluator(std::shared_ptr<Tape> t)
-    : DerivEvaluator(t, std::map<Tree::Id, float>())
+DerivEvaluator::DerivEvaluator(const Tree& root)
+    : DerivEvaluator(std::make_shared<Deck>(root))
 {
     // Nothing to do here
 }
 
 DerivEvaluator::DerivEvaluator(
-        std::shared_ptr<Tape> t, const std::map<Tree::Id, float>& vars)
-    : PointEvaluator(t, vars), d(3, tape->num_clauses + 1)
+        const Tree& root, const std::map<Tree::Id, float>& vars)
+    : DerivEvaluator(std::make_shared<Deck>(root), vars)
+{
+    // Nothing to do here
+}
+
+DerivEvaluator::DerivEvaluator(std::shared_ptr<Deck> d)
+    : DerivEvaluator(d, std::map<Tree::Id, float>())
+{
+    // Nothing to do here
+}
+
+DerivEvaluator::DerivEvaluator(
+        std::shared_ptr<Deck> deck, const std::map<Tree::Id, float>& vars)
+    : PointEvaluator(deck, vars), d(3, deck->num_clauses + 1)
 {
     // Initialize all derivatives to zero
     d = 0;
 
     // Load immutable derivatives for X, Y, Z
-    d(0, tape->X) = 1;
-    d(1, tape->Y) = 1;
-    d(2, tape->Z) = 1;
+    d(0, deck->X) = 1;
+    d(1, deck->Y) = 1;
+    d(2, deck->Z) = 1;
 }
 
 Eigen::Vector4f DerivEvaluator::deriv(const Eigen::Vector3f& pt)
 {
+    return deriv(pt, deck->tape);
+}
+
+Eigen::Vector4f DerivEvaluator::deriv(const Eigen::Vector3f& pt,
+        Tape::Handle tape)
+{
     // Perform value evaluation, saving results
-    auto w = eval(pt);
+    auto w = eval(pt, tape);
+
+    deck->bindOracles(tape);
     auto xyz = d.col(tape->rwalk(*this));
+    deck->unbindOracles();
 
     Eigen::Vector4f out;
     out << xyz, w;
@@ -155,7 +170,7 @@ void DerivEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
             break;
 
         case Opcode::ORACLE:
-            tape->oracles[a_]->evalDerivs(od);
+            deck->oracles[a_]->evalDerivs(od);
             break;
 
         case Opcode::INVALID:

@@ -1,57 +1,72 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
+
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #include "libfive/eval/eval_jacobian.hpp"
+#include "libfive/eval/deck.hpp"
+#include "libfive/eval/tape.hpp"
 
 namespace Kernel {
 
-JacobianEvaluator::JacobianEvaluator(std::shared_ptr<Tape> t)
-    : JacobianEvaluator(t, std::map<Tree::Id, float>())
+JacobianEvaluator::JacobianEvaluator(const Tree& root)
+    : JacobianEvaluator(std::make_shared<Deck>(root))
 {
     // Nothing to do here
 }
 
 JacobianEvaluator::JacobianEvaluator(
-        std::shared_ptr<Tape> t, const std::map<Tree::Id, float>& vars)
-    : DerivEvaluator(t, vars),
-      j(Eigen::ArrayXXf::Zero(tape->num_clauses + 1, tape->vars.size()))
+        const Tree& root, const std::map<Tree::Id, float>& vars)
+    : JacobianEvaluator(std::make_shared<Deck>(root), vars)
+{
+    // Nothing to do here
+}
+
+JacobianEvaluator::JacobianEvaluator(std::shared_ptr<Deck> d)
+    : JacobianEvaluator(d, std::map<Tree::Id, float>())
+{
+    // Nothing to do here
+}
+
+JacobianEvaluator::JacobianEvaluator(
+        std::shared_ptr<Deck> d, const std::map<Tree::Id, float>& vars)
+    : DerivEvaluator(d, vars),
+      j(Eigen::ArrayXXf::Zero(deck->num_clauses + 1, deck->vars.size()))
 {
     // Then drop a 1 at each var's position
     size_t index = 0;
-    for (auto& v : tape->vars.left)
+    for (auto& v : deck->vars.left)
     {
         j(v.first, index++) = 1;
     }
 }
 
-std::map<Tree::Id, float> JacobianEvaluator::gradient(const Eigen::Vector3f& p)
+std::map<Tree::Id, float> JacobianEvaluator::gradient(
+        const Eigen::Vector3f& p)
+{
+    return gradient(p, deck->tape);
+}
+std::map<Tree::Id, float> JacobianEvaluator::gradient(
+        const Eigen::Vector3f& p,
+        std::shared_ptr<Tape> tape)
 {
     // Perform value evaluation, to make sure the f array is correct
-    eval(p);
+    eval(p, tape);
 
     // Everybody do the tape walk!
+    deck->bindOracles(tape);
     auto ti = tape->rwalk(*this);
+    deck->unbindOracles();
 
     // Unpack from flat array into map
     // (to allow correlating back to VARs in Tree)
     std::map<Tree::Id, float> out;
     size_t index = 0;
-    for (auto v : tape->vars.left)
+    for (auto v : deck->vars.left)
     {
         out[v.second] = j(ti, index++);
     }

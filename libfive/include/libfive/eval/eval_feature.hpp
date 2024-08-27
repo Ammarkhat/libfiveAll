@@ -2,19 +2,9 @@
 libfive: a CAD kernel for modeling with implicit functions
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #pragma once
 
@@ -36,8 +26,9 @@ namespace Kernel {
 class FeatureEvaluator : public PointEvaluator
 {
 public:
-    FeatureEvaluator(std::shared_ptr<Tape> t);
-    FeatureEvaluator(std::shared_ptr<Tape> t,
+    FeatureEvaluator(const Tree& root);
+    FeatureEvaluator(std::shared_ptr<Deck> d);
+    FeatureEvaluator(std::shared_ptr<Deck> d,
                      const std::map<Tree::Id, float>& vars);
 
     /*
@@ -48,12 +39,16 @@ public:
      *      eval(x, y, z) == 0 => further checking is performed
      */
     bool isInside(const Eigen::Vector3f& p);
+    bool isInside(const Eigen::Vector3f& p,
+                  std::shared_ptr<Tape> tape);
 
     /*
      *  Checks for features at the given position, returning a list
      *  of unique feature normals.
      */
     std::list<Eigen::Vector3f> features(const Eigen::Vector3f& p);
+    std::list<Eigen::Vector3f> features(const Eigen::Vector3f& p,
+                                        std::shared_ptr<Tape> tape);
 
     /*
      *  Checks for features at the given position, returning a list
@@ -61,6 +56,8 @@ public:
      */
     const boost::container::small_vector<Feature, 4>&
         features_(const Eigen::Vector3f& p);
+    const boost::container::small_vector<Feature, 4>&
+        features_(const Eigen::Vector3f& p, std::shared_ptr<Tape> tape);
 
 protected:
     /*

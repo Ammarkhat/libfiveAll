@@ -2,47 +2,41 @@
 libfive: a CAD kernel for modeling with implicit functions
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #pragma once
 
 #include <Eigen/Eigen>
 
 #include "libfive/eval/base.hpp"
+#include "libfive/eval/clause.hpp"
 
 namespace Kernel {
+class Tape; /* Forward declaration */
 
 class PointEvaluator : public BaseEvaluator
 {
 public:
-    PointEvaluator(std::shared_ptr<Tape> t);
-    PointEvaluator(std::shared_ptr<Tape> t,
+    PointEvaluator(const Tree& root);
+    PointEvaluator(const Tree& root,
+                   const std::map<Tree::Id, float>& vars);
+    PointEvaluator(std::shared_ptr<Deck> t);
+    PointEvaluator(std::shared_ptr<Deck> t,
                    const std::map<Tree::Id, float>& vars);
 
     /*
      *  Single-point evaluation
      */
     float eval(const Eigen::Vector3f& pt);
-    float evalAndPush(const Eigen::Vector3f& pt);
+    float eval(const Eigen::Vector3f& pt, std::shared_ptr<Tape> tape);
 
-    /*
-     *  Evaluates the given point using whichever tape in the tape stack
-     *  contains the point in its region (this is useful when we're not
-     *  sure about which region the points fits into)
-     */
-    float baseEval(const Eigen::Vector3f& p);
+    std::pair<float, std::shared_ptr<Tape>> evalAndPush(
+            const Eigen::Vector3f& pt);
+    std::pair<float, std::shared_ptr<Tape>> evalAndPush(
+            const Eigen::Vector3f& pt,
+            std::shared_ptr<Tape> tape);
 
     /*
      *  Changes a variable's value

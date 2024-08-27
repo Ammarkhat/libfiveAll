@@ -1,20 +1,11 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
+
 Copyright (C) 2017  Matt Keeter
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2.1 of the License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this file,
+You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 
 #include "catch.hpp"
@@ -22,8 +13,8 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #include "libfive/render/brep/mesh.hpp"
 #include "libfive/render/brep/region.hpp"
 
-#include "libfive/eval/oracle_storage.hpp"
-#include "libfive/tree/oracle_clause.hpp"
+#include "libfive/oracle/oracle_storage.hpp"
+#include "libfive/oracle/oracle_clause.hpp"
 
 #include "util/shapes.hpp"
 #include "util/oracles.hpp"
@@ -39,7 +30,7 @@ void BRepCompare(const BRep<N>& first, const BRep<N>& second)
         CAPTURE(i);
         CAPTURE(first.verts[i]);
         CAPTURE(second.verts[i]);
-        REQUIRE(first.verts[i] == second.verts[i]);
+        REQUIRE((first.verts[i] - second.verts[i]).norm() < 1e-6);
     }
 
     REQUIRE(first.branes.size() == second.branes.size());
@@ -61,8 +52,10 @@ TEST_CASE("Oracle: render and compare (sphere)")
   Region<3> r({ -1, -1, -1 }, { 1, 1, 1 });
   Tree sOracle = convertToOracleAxes(s);
 
-  auto mesh = Mesh::render(sOracle, r);
-  auto comparisonMesh = Mesh::render(s, r);
+  // We can't use multithreading, because it causes triangles to be
+  // output in a non-deterministic order, which fails the comparison.
+  auto mesh = Mesh::render(sOracle, r, 0.1, 1e-8, false);
+  auto comparisonMesh = Mesh::render(s, r, 0.1, 1e-8, false);
 
   BRepCompare(*mesh, *comparisonMesh);
 }
@@ -79,8 +72,8 @@ TEST_CASE("Oracle: render and compare (cube)")
   Region<3> r({ -2.5, -2.5, -2.5 }, { 2.5, 2.5, 2.5 });
   Tree cubeOracle = convertToOracleAxes(cube);
 
-  auto mesh = Mesh::render(cubeOracle, r);
-  auto comparisonMesh = Mesh::render(cube, r);
+  auto mesh = Mesh::render(cubeOracle, r, 0.1, 1e-8, false);
+  auto comparisonMesh = Mesh::render(cube, r, 0.1, 1e-8, false);
 
   BRepCompare(*mesh, *comparisonMesh);
 }

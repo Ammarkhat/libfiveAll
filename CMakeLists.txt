@@ -113,6 +113,9 @@ endif()
 # Properly distinguish between Apple and upstream Clang
 cmake_policy(SET CMP0025 NEW)
 
+option(BUILD_STUDIO_APP "Build Studio application" ON)
+option(BUILD_GUILE_BINDINGS "Build Guile bindings" ON)
+
 set(CMAKE_BUILD_TYPE RELEASE)
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
@@ -182,27 +185,35 @@ endif(LIBFIVE_FIND_PKG_THREADS AND (UNIX AND NOT(APPLE)))
 ################################################################################
 # Inform the user which subsystems will be built and any missing deps
 message("Checking dependencies:")
-message("  libfive: ✓")
+message("  libfive:		✓")
 
-if (GUILE_FOUND)
-    message("  libfive-guile:     ✓")
+if (BUILD_GUILE_BINDINGS)
+  if (GUILE_FOUND)
+    message("  libfive-guile:	✓")
 
     # Sadly, this is a global setting (there's no target_link_directories)
     link_directories(${GUILE_LIBRARY_DIRS})
-else ()
-    message("  libfive-guile:     ✘   (needs Guile 2.2 or later)")
+  else ()
+    message("  libfive-guile:	✘   (needs Guile 2.2 or later)")
+  endif()
+else()
+    message("  libfive-guile:	✘   (skipping)")
 endif()
 
-if (Qt5Core_FOUND AND GUILE_FOUND)
-    message("  Studio:       ✓")
-else ()
+if (BUILD_STUDIO_APP)
+  if (Qt5Core_FOUND AND GUILE_FOUND)
+    message("  Studio:		✓")
+  else ()
     if (Qt5Core_FOUND)
-        message("  Studio:       ✘   (needs Guile 2.2 or later)")
+      message("  Studio:		✘   (needs Guile 2.2 or later)")
     elseif (GUILE_FOUND)
-        message("  Studio:       ✘   (Qt 5.7 or later)")
+      message("  Studio:		✘   (Qt 5.7 or later)")
     else()
-        message("  Studio:       ✘   (needs Guile 2.2 or later and Qt 5.7 or later)")
+      message("  Studio:		✘   (needs Guile 2.2 or later and Qt 5.7 or later)")
     endif()
+  endif()
+else()
+    message("  Studio:		✘   (skipping)")
 endif()
 
 ################################################################################
@@ -213,6 +224,6 @@ set(LIBFIVE_BUILD_FROM_ROOT true)
 # Always build the kernel and test suite
 add_subdirectory(libfive)
 
-if(GUILE_FOUND AND Qt5Core_FOUND)
+if(BUILD_STUDIO_APP AND GUILE_FOUND AND Qt5Core_FOUND)
     add_subdirectory(studio)
-endif(GUILE_FOUND AND Qt5Core_FOUND)
+endif(BUILD_STUDIO_APP AND GUILE_FOUND AND Qt5Core_FOUND)
