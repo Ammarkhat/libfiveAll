@@ -7,9 +7,10 @@ This Source Code Form is subject to the terms of the Mozilla Public
 License, v. 2.0. If a copy of the MPL was not distributed with this file,
 You can obtain one at http://mozilla.org/MPL/2.0/.
 */
-#include "dc_tree.cpp"
+#include "dc_tree.inl"
+#include "../object_pool.inl"
 
-namespace Kernel {
+namespace libfive {
 
 template <>
 bool DCTree<2>::cornersAreManifold(const uint8_t corner_mask)
@@ -46,17 +47,8 @@ bool DCTree<2>::leafsAreManifold(
     return edges_safe && faces_safe;
 }
 
-template <>
-const std::vector<std::pair<uint8_t, uint8_t>>& DCTree<2>::edges() const
-{
-    static const std::vector<std::pair<uint8_t, uint8_t>> es =
-        {{0, Axis::X}, {0, Axis::Y},
-         {Axis::X, Axis::X|Axis::Y}, {Axis::Y, Axis::Y|Axis::X}};
-    return es;
-}
-
-// Explicit initialization of template
-template class XTree<2, DCTree<2>, DCLeaf<2>>;
+// Explicit initialization of templates
 template class DCTree<2>;
+template struct DCLeaf<2>;
 
-}   // namespace Kernel
+}   // namespace libfive

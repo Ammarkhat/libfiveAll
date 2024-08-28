@@ -9,13 +9,18 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #pragma once
 
 #include <stack>
+#include <boost/lockfree/stack.hpp>
+
 #include "libfive/render/brep/per_thread_brep.hpp"
-#include "libfive/render/brep/progress.hpp"
+#include "libfive/render/brep/free_thread_handler.hpp"
+#include "libfive/render/brep/settings.hpp"
+#include "libfive/render/brep/mesh.hpp"
+#include "libfive/render/brep/root.hpp"
+
 #include "libfive/render/axes.hpp"
 #include "libfive/eval/interval.hpp"
-#include "libfive/render/brep/mesh.hpp"
 
-namespace Kernel {
+namespace libfive {
 
 /*
  *  Class to walk a dual grid for a quad or octree
@@ -36,9 +41,8 @@ public:
       */
     template<typename M, typename ... A>
     static std::unique_ptr<typename M::Output> walk(
-            const Root<typename M::Input>& t, unsigned workers,
-            std::atomic_bool& cancel,
-            ProgressCallback progress_callback,
+            const Root<typename M::Input>& t,
+            const BRepSettings& settings,
             A... args);
 
      /*
@@ -54,17 +58,17 @@ public:
       */
     template<typename M>
     static std::unique_ptr<typename M::Output> walk_(
-            const Root<typename M::Input>& t, unsigned workers,
-            std::atomic_bool& cancel,
-            ProgressCallback progress_callback,
+            const Root<typename M::Input>& t,
+            const BRepSettings& settings,
             std::function<M(PerThreadBRep<N>&, int)> MesherFactory);
 
 protected:
     template<typename T, typename Mesher>
-    static void run(Mesher& m, ProgressWatcher* progress,
+    static void run(Mesher& m,
                     boost::lockfree::stack<const T*,
                                            boost::lockfree::fixed_sized<true>>& tasks,
-                    std::atomic_bool& done, std::atomic_bool& cancel);
+                    const BRepSettings& settings,
+                    std::atomic_bool& done);
 
     template <typename T, typename Mesher>
     static void work(const T* t, Mesher& m);
@@ -228,12 +232,12 @@ void Dual<3>::handleTopEdges(T* t, V& v)
 template <unsigned N>
 template<typename M, typename ... A>
 std::unique_ptr<typename M::Output> Dual<N>::walk(
-            const Root<typename M::Input>& t, unsigned workers,
-            std::atomic_bool& cancel,
-            ProgressCallback progress_callback,
+            const Root<typename M::Input>& t,
+            const BRepSettings& settings,
             A... args)
 {
-    return Dual<N>::walk_<M>(t, workers, cancel, progress_callback,
+    return walk_<M>(
+            t, settings,
             [&args...](PerThreadBRep<N>& brep, int i) {
                 (void)i;
                 return M(brep, args...);
@@ -244,35 +248,35 @@ std::unique_ptr<typename M::Output> Dual<N>::walk(
 template <unsigned N>
 template<typename M>
 std::unique_ptr<typename M::Output> Dual<N>::walk_(
-            const Root<typename M::Input>& t, unsigned workers,
-            std::atomic_bool& cancel,
-            ProgressCallback progress_callback,
+            const Root<typename M::Input>& t,
+            const BRepSettings& settings,
             std::function<M(PerThreadBRep<N>&, int)> MesherFactory)
 {
-    boost::lockfree::stack<const typename M::Input*,
-                           boost::lockfree::fixed_sized<true>> tasks(workers);
+    boost::lockfree::stack<
+        const typename M::Input*,
+        boost::lockfree::fixed_sized<true>> tasks(settings.workers);
     tasks.push(t.get());
     t->resetPending();
 
-    std::atomic_uint32_t global_index(1);
+    std::atomic<uint32_t> global_index(1);
     std::vector<PerThreadBRep<N>> breps;
-    for (unsigned i=0; i < workers; ++i) {
+    for (unsigned i=0; i < settings.workers; ++i) {
         breps.emplace_back(PerThreadBRep<N>(global_index));
     }
 
-    std::atomic_bool done(false);
-
-    auto progress = ProgressWatcher::build(
-            t.size(), 1.0f,
-            progress_callback, done, cancel);
+    if (settings.progress_handler) {
+        settings.progress_handler->nextPhase(t.size() + 1);
+    }
 
     std::vector<std::future<void>> futures;
-    futures.resize(workers);
-    for (unsigned i=0; i < workers; ++i) {
+    futures.resize(settings.workers);
+    std::atomic_bool done(false);
+    for (unsigned i=0; i < settings.workers; ++i) {
         futures[i] = std::async(std::launch::async,
-            [&breps, &done, &cancel, &tasks, &MesherFactory, i, progress]() {
+            [&breps, &tasks, &MesherFactory, &settings, &done, i]()
+            {
                 auto m = MesherFactory(breps[i], i);
-                Dual<N>::run(m, progress, tasks, done, cancel);
+                Dual<N>::run(m, tasks, settings, done);
             });
     }
 
@@ -281,7 +285,7 @@ std::unique_ptr<typename M::Output> Dual<N>::walk_(
         f.get();
     }
 
-    assert(done.load() || cancel.load());
+    assert(done.load() || settings.cancel.load());
 
     // Handle the top tree edges (only used for simplex meshing)
     if (M::needsTopEdges()) {
@@ -289,11 +293,7 @@ std::unique_ptr<typename M::Output> Dual<N>::walk_(
         Dual<N>::handleTopEdges(t.get(), m);
     }
 
-    // This causes the progress tracker to terminate
-    done.store(true);
-    delete progress;
-
-    auto out = std::unique_ptr<typename M::Output>(new typename M::Output);
+    auto out = std::make_unique<typename M::Output>();
     out->collect(breps);
     return out;
 }
@@ -301,16 +301,18 @@ std::unique_ptr<typename M::Output> Dual<N>::walk_(
 
 template <unsigned N>
 template <typename T, typename V>
-void Dual<N>::run(V& v, ProgressWatcher* progress,
+void Dual<N>::run(V& v,
                   boost::lockfree::stack<const T*,
                                          boost::lockfree::fixed_sized<true>>& tasks,
-                  std::atomic_bool& done, std::atomic_bool& cancel)
+                  const BRepSettings& settings,
+                  std::atomic_bool& done)
+
 {
     // Tasks to be evaluated by this thread (populated when the
     // MPMC stack is completely full).
     std::stack<const T*, std::vector<const T*>> local;
 
-    while (!done.load() && !cancel.load())
+    while (!done.load() && !settings.cancel.load())
     {
         // Prioritize picking up a local task before going to
         // the MPMC queue, to keep things in this thread for
@@ -330,6 +332,9 @@ void Dual<N>::run(V& v, ProgressWatcher* progress,
         // (so that we terminate when either of the flags are set).
         if (t == nullptr)
         {
+            if (settings.free_thread_handler != nullptr) {
+                settings.free_thread_handler->offerWait();
+            }
             continue;
         }
 
@@ -346,14 +351,24 @@ void Dual<N>::run(V& v, ProgressWatcher* progress,
             continue;
         }
 
+        // Special-case for singleton trees, which have null parents
+        // (and have already been subtracted from pending)
+        if (T::isSingleton(t)) {
+            continue;
+        }
+
+        if (settings.progress_handler) {
+            settings.progress_handler->tick();
+        }
+
         for (t = t->parent; t && t->pending-- == 0; t = t->parent)
         {
             // Do the actual DC work (specialized for N = 2 or 3)
             Dual<N>::work(t, v);
 
             // Report trees as completed
-            if (progress) {
-                progress->tick();
+            if (settings.progress_handler) {
+                settings.progress_handler->tick();
             }
         }
 
@@ -369,4 +384,4 @@ void Dual<N>::run(V& v, ProgressWatcher* progress,
     done.store(true);
 }
 
-}   // namespace Kernel
+}   // namespace libfive

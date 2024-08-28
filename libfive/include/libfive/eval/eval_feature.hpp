@@ -10,10 +10,11 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 
 #include <Eigen/Eigen>
 
-#include "libfive/eval/eval_deriv.hpp"
+#include "libfive/eval/eval_deriv_array.hpp"
 #include "libfive/eval/feature.hpp"
+#include "libfive/render/brep/region.hpp"
 
-namespace Kernel {
+namespace libfive {
 
 /*
  *  FeatureEvaluator is an enhanced version of DerivEvaluator.
@@ -23,7 +24,7 @@ namespace Kernel {
  *
  *  This is more expensive, but also more awesome.
  */
-class FeatureEvaluator : public PointEvaluator
+class FeatureEvaluator : public DerivArrayEvaluator
 {
 public:
     FeatureEvaluator(const Tree& root);
@@ -39,8 +40,19 @@ public:
      *      eval(x, y, z) == 0 => further checking is performed
      */
     bool isInside(const Eigen::Vector3f& p);
-    bool isInside(const Eigen::Vector3f& p,
-                  std::shared_ptr<Tape> tape);
+    bool isInside(const Eigen::Vector3f& p, const std::shared_ptr<Tape>& tape);
+
+    /*
+     *  Helper function to reduce boilerplate
+     */
+    template <unsigned N>
+    bool isInside(const Eigen::Matrix<double, N, 1>& p, const Region<N>& region,
+                  const std::shared_ptr<Tape>& tape)
+    {
+        Eigen::Vector3f v;
+        v << p.template cast<float>(), region.perp.template cast<float>();
+        return isInside(v, tape);
+    }
 
     /*
      *  Checks for features at the given position, returning a list
@@ -48,7 +60,16 @@ public:
      */
     std::list<Eigen::Vector3f> features(const Eigen::Vector3f& p);
     std::list<Eigen::Vector3f> features(const Eigen::Vector3f& p,
-                                        std::shared_ptr<Tape> tape);
+                                        const std::shared_ptr<Tape>& tape);
+    template <unsigned N>
+    std::list<Eigen::Vector3f> features(const Eigen::Matrix<double, N, 1>& p,
+                                        const Region<N>& region,
+                                        const std::shared_ptr<Tape>& tape)
+    {
+        Eigen::Vector3f v;
+        v << p.template cast<float>(), region.perp.template cast<float>();
+        return features(v, tape);
+    }
 
     /*
      *  Checks for features at the given position, returning a list
@@ -57,7 +78,7 @@ public:
     const boost::container::small_vector<Feature, 4>&
         features_(const Eigen::Vector3f& p);
     const boost::container::small_vector<Feature, 4>&
-        features_(const Eigen::Vector3f& p, std::shared_ptr<Tape> tape);
+        features_(const Eigen::Vector3f& p, const std::shared_ptr<Tape>& tape);
 
 protected:
     /*
@@ -66,10 +87,16 @@ protected:
     void operator()(Opcode::Opcode op, Clause::Id id,
                     Clause::Id a, Clause::Id b);
 
+    /*  Raw feature data */
     Eigen::Array<boost::container::small_vector<Feature, 4>,
-                 1, Eigen::Dynamic> d;
+                 1, Eigen::Dynamic> f;
 
-    friend class Tape; // for rwalk<DerivEvaluator>
+    /*  filled(id) represents how many slots of v.row(id) have been filled
+     *  with v(id, 0).  This is needed because we do point-wise evaluation
+     *  on a single slot (to get values), then need to copy that value into
+     *  multiple slots to have the correct value for array-wise derivative
+     *  evaluations. */
+    Eigen::Array<unsigned, 1, Eigen::Dynamic> filled;
 };
 
-}   // namespace Kernel
+}   // namespace libfive

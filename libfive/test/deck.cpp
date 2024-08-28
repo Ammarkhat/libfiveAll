@@ -14,7 +14,7 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #include "libfive/tree/tree.hpp"
 #include "libfive/eval/deck.hpp"
 
-using namespace Kernel;
+using namespace libfive;
 
 TEST_CASE("Deck::num_clauses")
 {
@@ -24,7 +24,7 @@ TEST_CASE("Deck::num_clauses")
 
 TEST_CASE("Deck::XYZ")
 {
-    Deck t(Tree::X() + 1);
+    Deck t(Tree::X() + 2);
     REQUIRE(t.X == 3);
     REQUIRE(t.Y == 4);
     REQUIRE(t.Z == 5);
@@ -37,5 +37,5 @@ TEST_CASE("Deck::constants")
 
     CAPTURE(t.constants.begin()->first);
     CAPTURE(t.constants.begin()->second);
-    REQUIRE(t.constants.at(2) == 5.0f);
+    REQUIRE(t.constants[0] == std::make_pair<Clause::Id, float>(2, 5.0f));
 }

@@ -9,6 +9,7 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #pragma once
 
 #include <vector>
+#include <memory>
 
 #include <Eigen/Eigen>
 
@@ -17,13 +18,13 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 
 #include "libfive/oracle/oracle_context.hpp"
 
-namespace Kernel {
+namespace libfive {
 
 /*  Foward declarations */
 template <unsigned N> class Region;
 class Deck;
 
-class Tape
+class Tape : public std::enable_shared_from_this<Tape>
 {
 public:
     /*  Returned by evaluator types when pushing
@@ -54,6 +55,14 @@ public:
      */
     bool isTerminal() const { return terminal; }
 
+    std::vector<Clause>::const_reverse_iterator rbegin() const
+    { return t.crbegin(); }
+
+    std::vector<Clause>::const_reverse_iterator rend() const
+    { return t.crend(); }
+
+    Clause::Id root() const { return i; }
+
 protected:
     /*  The tape itself, as a vector of clauses  */
     std::vector<Clause> t;
@@ -66,7 +75,7 @@ protected:
     Clause::Id i;
 
     /*  These bounds are only valid if type == INTERVAL  */
-    Interval::I X, Y, Z;
+    Interval X, Y, Z;
     Type type;
 
     /*  If terminal is true, then the tape contains no min/max clauses
@@ -87,34 +96,8 @@ public:
      */
     using KeepFunction = std::function<Keep(Opcode::Opcode, Clause::Id,
                                             Clause::Id, Clause::Id)>;
-    static Handle push(const Handle& tape, Deck& deck, KeepFunction fn, Type t);
-    static Handle push(const Handle& tape, Deck& deck, KeepFunction fn, Type t,
-                       const Region<3>& r);
-
-    /*
-     *  Walks through the tape in bottom-to-top (reverse) order,
-     *  calling an arbitrary function for every clause.
-     *
-     *  Returns the clause id of the tape's root
-     */
-    using WalkFunction = std::function<void(Opcode::Opcode, Clause::Id,
-                                            Clause::Id, Clause::Id)>;
-    Clause::Id rwalk(WalkFunction fn, bool& abort);
-
-    /*
-     *  Inlined, faster version of rwalk
-     */
-    template <class T>
-    Clause::Id rwalk(T& fn)
-    {
-        for (auto itr = t.rbegin(); itr != t.rend(); ++itr)
-        {
-            fn(itr->op, itr->id, itr->a, itr->b);
-        }
-        return i;
-    }
-
-    void  walk(WalkFunction fn, bool& abort);
+    Handle push(Deck& deck, KeepFunction fn, Type t);
+    Handle push(Deck& deck, KeepFunction fn, Type t, const Region<3>& r);
 
     /*
      *  Walks up the tape list until p is within the tape's region, then
@@ -124,10 +107,10 @@ public:
      *  into a deeper interval, e.g. in dual contouring where points can
      *  be positioned outside of their parent cells.
      */
-    static Handle getBase(Handle tape, const Eigen::Vector3f& p);
-    static Handle getBase(Handle tape, const Region<3>& r);
+    Handle getBase(const Eigen::Vector3f& p);
+    Handle getBase(const Region<3>& r);
 
     friend class Deck;
 };
 
-}   // namespace Kernel
+}   // namespace libfive

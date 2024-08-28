@@ -14,9 +14,10 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 
 #include "libfive/render/brep/dc/intersection.hpp"
 #include "libfive/render/brep/neighbors.hpp"
+#include "libfive/render/brep/indexes.hpp"
 #include "libfive/eval/interval.hpp"
 
-namespace Kernel {
+namespace libfive {
 
 // Forward declaration
 template <unsigned N> class DCTree;
@@ -35,18 +36,21 @@ public:
      *  by any of the neighbors, returning FILLED / EMPTY if that is the case
      *  and UNKNOWN otherwise.
      */
-    Interval::State check(uint8_t corner) const;
+    Interval::State check(CornerIndex corner) const;
+
+    /*
+     *  Checks the given corner against all neighbors that contain it.
+     *  If any of them don't match, then return that tree + corner index.
+     */
+    std::pair<const DCTree<N>*, unsigned> checkConsistency(
+            CornerIndex corner, Interval::State i) const;
 
     /*
      *  Looks up the given edge to see if it has been calculated by any
      *  of the neighbors, assigning the pointer if that is the case
      *  and setting it to nullptr otherwise.
      */
-    std::shared_ptr<IntersectionVec<N>> check(uint8_t a, uint8_t b) const;
+    Intersection<N>* check(uint8_t a, uint8_t b) const;
 };
 
-//  We explicitly instantiate the Neighbors classes in neighbors.cpp
-extern template class DCNeighbors<2>;
-extern template class DCNeighbors<3>;
-
-}   // namespace Kernel
+}   // namespace libfive

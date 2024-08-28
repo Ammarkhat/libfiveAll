@@ -10,7 +10,7 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 
 #include <cstdint>
 
-namespace Kernel {
+namespace libfive {
 
 struct CornerIndex; // Forward declaration
 
@@ -34,10 +34,19 @@ struct NeighborIndex {
     constexpr NeighborIndex() : i(0) {}
     constexpr NeighborIndex(unsigned i) : i(i) {}
 
-    constexpr unsigned dimension() const {
+    /*  Calling dimension() on a constexpr NeighborIndex and using it as a 
+     *  constexpr value seems to cause an internal compiler error in Visual 
+     *  Studio, so we can use this helper static method for a workaround.
+     */
+
+    static constexpr unsigned dimension(unsigned i) {
         return i
             ? ((i % 3) == 2) + NeighborIndex(i / 3).dimension()
             : 0;
+    }
+
+    constexpr unsigned dimension() const {
+        return dimension(i);
     }
 
     // Defined below, after struct CornerIndex is defined
@@ -84,6 +93,9 @@ struct NeighborIndex {
     constexpr bool isAxisFixed(uint8_t a) const
     { return fixed() & (1 << a); }
 
+    constexpr bool axisPosition(uint8_t a) const
+    { return pos() & (1 << a); }
+
     /*
      *  Returns a bitfield representing which axes are fixed,
      *  with extra-dimension axes masked.
@@ -118,6 +130,7 @@ struct NeighborIndex {
             : 0);
     }
     int i;
+
 };
 
 /*
@@ -157,4 +170,4 @@ inline constexpr bool NeighborIndex::contains(const CornerIndex& c) const {
         : (c.i == 0);
 }
 
-}   // namespace Kernel
+}   // namespace libfive

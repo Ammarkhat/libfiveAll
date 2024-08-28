@@ -12,14 +12,17 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 
 #include "libfive/render/brep/mesh.hpp"
 #include "libfive/render/brep/region.hpp"
+#include "libfive/render/brep/settings.hpp"
 
 #include "libfive/oracle/oracle_storage.hpp"
 #include "libfive/oracle/oracle_clause.hpp"
 
+#include "libfive/eval/eval_deriv_array.hpp"
+
 #include "util/shapes.hpp"
 #include "util/oracles.hpp"
 
-using namespace Kernel;
+using namespace libfive;
 
 // Compares two BRep objects using Catch macros
 template <unsigned N>
@@ -30,15 +33,58 @@ void BRepCompare(const BRep<N>& first, const BRep<N>& second)
         CAPTURE(i);
         CAPTURE(first.verts[i]);
         CAPTURE(second.verts[i]);
+        CAPTURE(first.verts[i] - second.verts[i]);
         REQUIRE((first.verts[i] - second.verts[i]).norm() < 1e-6);
     }
 
     REQUIRE(first.branes.size() == second.branes.size());
-    for (unsigned i = 0; i < first.branes.size(); ++i) {
+    REQUIRE(first.branes.size() % 2 == 0);
+    for (unsigned i = 0; i < first.branes.size(); i += 2) {
+        // There are two different ways to triangulate quads, and the
+        // two BReps may have chosen different ones depending on minute
+        // differences in vertex position (below the 1e-6 checked above).
+        //
+        // Here, we detect which winding each quad is using, to do a fair
+        // comparison.
+        bool f = first.branes[i][0] == first.branes[i + 1][0];
+        bool s = second.branes[i][0] == second.branes[i + 1][0];
+
         CAPTURE(i);
         CAPTURE(first.branes[i]);
+        CAPTURE(first.branes[i + 1]);
         CAPTURE(second.branes[i]);
-        REQUIRE(first.branes[i] == second.branes[i]);
+        CAPTURE(second.branes[i + 1]);
+        CAPTURE(f);
+        CAPTURE(s);
+        if (f == s) {
+            REQUIRE(first.branes[i] == second.branes[i]);
+            REQUIRE(first.branes[i + 1] == second.branes[i + 1]);
+        } else if (f) {
+            REQUIRE(first.branes[i][0] == second.branes[i][0]);
+            REQUIRE(first.branes[i][1] == second.branes[i][1]);
+            REQUIRE(first.branes[i][2] == second.branes[i + 1][2]);
+
+            REQUIRE(first.branes[i + 1][0] == second.branes[i][0]);
+            REQUIRE(first.branes[i + 1][1] == second.branes[i + 1][2]);
+            REQUIRE(first.branes[i + 1][2] == second.branes[i][2]);
+
+            REQUIRE(first.branes[i + 1][2] == second.branes[i + 1][0]);
+            REQUIRE(first.branes[i][1] == second.branes[i + 1][1]);
+
+        } else if (s) {
+            REQUIRE(second.branes[i][0] == first.branes[i][0]);
+            REQUIRE(second.branes[i][1] == first.branes[i][1]);
+            REQUIRE(second.branes[i][2] == first.branes[i + 1][2]);
+
+            REQUIRE(second.branes[i + 1][0] == first.branes[i][0]);
+            REQUIRE(second.branes[i + 1][1] == first.branes[i + 1][2]);
+            REQUIRE(second.branes[i + 1][2] == first.branes[i][2]);
+
+            REQUIRE(second.branes[i + 1][2] == first.branes[i + 1][0]);
+            REQUIRE(second.branes[i][1] == first.branes[i + 1][1]);
+        } else {
+            REQUIRE(false);
+        }
     }
 }
 
@@ -54,8 +100,11 @@ TEST_CASE("Oracle: render and compare (sphere)")
 
   // We can't use multithreading, because it causes triangles to be
   // output in a non-deterministic order, which fails the comparison.
-  auto mesh = Mesh::render(sOracle, r, 0.1, 1e-8, false);
-  auto comparisonMesh = Mesh::render(s, r, 0.1, 1e-8, false);
+  BRepSettings settings;
+  settings.workers = 1;
+  settings.min_feature = 0.1;
+  auto mesh = Mesh::render(sOracle, r, settings);
+  auto comparisonMesh = Mesh::render(s, r, settings);
 
   BRepCompare(*mesh, *comparisonMesh);
 }
@@ -72,8 +121,12 @@ TEST_CASE("Oracle: render and compare (cube)")
   Region<3> r({ -2.5, -2.5, -2.5 }, { 2.5, 2.5, 2.5 });
   Tree cubeOracle = convertToOracleAxes(cube);
 
-  auto mesh = Mesh::render(cubeOracle, r, 0.1, 1e-8, false);
-  auto comparisonMesh = Mesh::render(cube, r, 0.1, 1e-8, false);
+  BRepSettings settings;
+  settings.workers = 1;
+  settings.min_feature = 0.1;
+
+  auto mesh = Mesh::render(cubeOracle, r, settings);
+  auto comparisonMesh = Mesh::render(cube, r, settings);
 
   BRepCompare(*mesh, *comparisonMesh);
 }
@@ -88,13 +141,95 @@ TEST_CASE("Oracle: render and compare (cube as oracle)")
         max(-(Tree::Z() + 1.5),
             Tree::Z() - 1.5));
 
-    Tree cubeOracle(std::unique_ptr<CubeOracleClause>(new CubeOracleClause()));
+    Tree cubeOracle(std::make_unique<CubeOracleClause>());
 
     //  The region is set so we hit where the interesting stuff happens.
     Region<3> r({ -3., -3., -3. }, { 3., 3., 3. });
 
-    auto mesh = Mesh::render(cubeOracle, r, 1.6);
-    auto comparisonMesh = Mesh::render(cube, r);
+    BRepSettings settings;
+    settings.workers = 1;
+    settings.min_feature = 1.6;
+
+    auto mesh = Mesh::render(cubeOracle, r, settings);
+    auto comparisonMesh = Mesh::render(cube, r, settings);
 
     BRepCompare(*mesh, *comparisonMesh);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+class PickySIMDOracle : public OracleStorage<256>
+{
+public:
+    PickySIMDOracle(long& expected_eval_size)
+        : expected_eval_size(expected_eval_size)
+    {
+        // Nothing to do here
+    }
+
+    // We don't care about any of these functions
+    void evalInterval(Interval&) override {}
+    void evalPoint(float&, size_t) override {}
+    void checkAmbiguous(
+            Eigen::Block<Eigen::Array<bool, 1, LIBFIVE_EVAL_ARRAY_SIZE>,
+                         1, Eigen::Dynamic>) override {}
+    void evalFeatures(
+            boost::container::small_vector<Feature, 4>&) override {}
+
+    void evalArray(
+            Eigen::Block<Eigen::Array<float, Eigen::Dynamic,
+                                      LIBFIVE_EVAL_ARRAY_SIZE,
+                                      Eigen::RowMajor>,
+                         1, Eigen::Dynamic> out) override
+    {
+        REQUIRE(out.cols() == expected_eval_size);
+        out = 0.0f;
+    }
+
+    void evalDerivArray(
+            Eigen::Block<Eigen::Array<float, 3, LIBFIVE_EVAL_ARRAY_SIZE>,
+                         3, Eigen::Dynamic, true> out) override
+    {
+        REQUIRE(out.cols() == expected_eval_size);
+        out = 0.0f;
+    }
+
+    long& expected_eval_size;
+};
+
+class PickySIMDOracleClause : public OracleClause
+{
+public:
+    PickySIMDOracleClause(long& expected_eval_size)
+        : expected_eval_size(expected_eval_size)
+    {
+        // Nothing to do here
+    }
+    std::unique_ptr<Oracle> getOracle() const override
+    {
+        return std::make_unique<PickySIMDOracle>(expected_eval_size);
+    }
+
+    std::string name() const override
+    {
+        return "PickySIMDOracle";
+    }
+    long& expected_eval_size;
+};
+
+TEST_CASE("Oracle: check SIMD clamping")
+{
+    long expected_eval_size = 0;
+    Tree picky(std::make_unique<PickySIMDOracleClause>(expected_eval_size));
+
+    DerivArrayEvaluator eval(picky + Tree::X() + 1.0f);
+    for (unsigned i=1; i < 100; ++i) {
+        eval.set(Eigen::Vector3f(i, 0, 0), i);
+        expected_eval_size = i;
+        eval.values(i);
+        eval.derivs(i);
+    }
+
+    // The test will have failed in PickySIMDOracle
+    REQUIRE(true);
 }

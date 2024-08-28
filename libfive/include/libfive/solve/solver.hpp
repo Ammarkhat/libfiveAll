@@ -13,10 +13,9 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 
 #include <Eigen/Eigen>
 
-#include "libfive/tree/cache.hpp"
 #include "libfive/eval/eval_jacobian.hpp"
 
-namespace Kernel {
+namespace libfive {
 
 class Tree;
 
@@ -36,10 +35,10 @@ namespace Solver
             const Eigen::Vector3f pos={0,0,0}, const Mask& mask=Mask(),
             unsigned gas=25000);
     std::pair<float, Solution> findRoot(
-            JacobianEvaluator& e, std::shared_ptr<Tape> tape,
+            JacobianEvaluator& e, const std::shared_ptr<Tape>& tape,
             std::map<Tree::Id, float> vars,
             const Eigen::Vector3f pos={0,0,0}, const Mask& mask=Mask(),
             unsigned gas=25000);
 
 }   // namespace Solver
-}   // namespace Kernel
+}   // namespace libfive

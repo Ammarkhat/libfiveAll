@@ -10,11 +10,11 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 
 #include <Eigen/Eigen>
 
-#include "libfive/eval/eval_deriv.hpp"
+#include "libfive/eval/eval_feature.hpp"
 
-namespace Kernel {
+namespace libfive {
 
-class JacobianEvaluator : public DerivEvaluator
+class JacobianEvaluator : public FeatureEvaluator
 {
 public:
     JacobianEvaluator(const Tree& root);
@@ -29,20 +29,13 @@ public:
      */
     std::map<Tree::Id, float> gradient(const Eigen::Vector3f& p);
     std::map<Tree::Id, float> gradient(const Eigen::Vector3f& p,
-            std::shared_ptr<Tape> tape);
+                                       const Tape& tape);
 
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    ALIGNED_OPERATOR_NEW_AND_DELETE(JacobianEvaluator)
+
 protected:
-    /*
-     *  Raw clause evaluation is done here!
-     */
-    void operator()(Opcode::Opcode op, Clause::Id id,
-                    Clause::Id a, Clause::Id b);
-
-    /*  j(clause, var) = dclause / dvar */
-    Eigen::Array<float, Eigen::Dynamic, Eigen::Dynamic> j;
-
-    friend class Tape; // for rwalk<JacobianEvaluator>
+    /*  j(var) = dout / dvar */
+    Eigen::Array<float, Eigen::Dynamic, 1> j;
 };
 
-}   // namespace Kernel
+}   // namespace libfive

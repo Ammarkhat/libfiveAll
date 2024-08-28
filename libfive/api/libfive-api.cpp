@@ -28,19 +28,25 @@ void boost::throw_exception(std::exception const & e){
 //do nothing
 }
 
+// Tree _union(Tree, Tree);
+// Tree intersection(Tree, Tree);
+// Tree inverse(Tree);
+// Tree difference(Tree, Tree);
+// Tree offset(Tree, TreeFloat);
+// Tree sphere(TreeFloat, TreeVec3);
 
 const char *OUTPUT_FILENAME = "exported.stl";
 // const float OUTPUT_RESOLUTION = 15.0;
 
 using namespace emscripten;
-using namespace Kernel;
+using namespace libfive;
 
-Kernel::Tree sphereOld(float radius, float cx, float cy, float cz){
-  auto x = Kernel::Tree::X() - Kernel::Tree(cx);
-  auto y = Kernel::Tree::Y() - Kernel::Tree(cy);
-  auto z = Kernel::Tree::Z() - Kernel::Tree(cz);
+Tree sphereOld(float radius, float cx, float cy, float cz){
+  auto x = Tree::X() - Tree(cx);
+  auto y = Tree::Y() - Tree(cy);
+  auto z = Tree::Z() - Tree(cz);
 
-  auto r = Kernel::Tree(radius);
+  auto r = Tree(radius);
   auto out = (x * x) + (y * y) + (z * z) - r;
   return out;
 }

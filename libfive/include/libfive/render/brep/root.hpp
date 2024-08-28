@@ -9,9 +9,10 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #pragma once
 
 #include "libfive/render/brep/object_pool.hpp"
+#include "libfive/render/brep/settings.hpp"
 #include "libfive/render/brep/progress.hpp"
 
-namespace Kernel {
+namespace libfive {
 
 template <typename T>
 class Root
@@ -29,22 +30,16 @@ public:
         return *this;
     }
 
-    ~Root() { reset(); }
+    ~Root() { reset(BRepSettings()); }
 
-    void reset(unsigned workers=8,
-               ProgressCallback progress_callback=EMPTY_PROGRESS_CALLBACK)
+    void reset(const BRepSettings& settings)
     {
+        delete ptr;
         ptr = nullptr;
-
-        std::atomic_bool done(false);
-        std::atomic_bool cancel(false);
-        auto progress_watcher = ProgressWatcher::build(
-                object_pool.total_size(), 2.0f,
-                progress_callback, done, cancel);
-
-        object_pool.reset(workers, progress_watcher);
-        done.store(true);
-        delete progress_watcher;
+        if (settings.progress_handler) {
+            settings.progress_handler->nextPhase(object_pool.num_blocks());
+        }
+        object_pool.reset(settings.workers, settings.progress_handler);
     }
 
     const T* operator->() const { return ptr; }
@@ -64,8 +59,8 @@ protected:
     // Used for progress tracking.  We use a signed value here because,
     // as we claim Pools of XTrees, it's possible for the intermediate
     // result to go negative (if one pool has claimed many trees from
-    // another Pool, so it owns more trees than it has allocated)..
+    // another Pool, so it owns more trees than it has allocated).
     int64_t tree_count=0;
 };
 
-}   // namespace Kernel
+}   // namespace libfive

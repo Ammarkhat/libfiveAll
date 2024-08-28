@@ -12,8 +12,9 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #include <array>
 
 #include "libfive/render/brep/util.hpp"
+#include "libfive/render/brep/default_new_delete.hpp"
 
-namespace Kernel {
+namespace libfive {
 
 template <unsigned int N>
 class Region
@@ -70,16 +71,34 @@ public:
         return lower;
     }
 
+    const Pt& operator[](std::size_t idx) const
+    {
+        switch(idx)
+        {
+            case 0: return lower;
+            case 1: return upper;
+            default: assert(false);
+        }
+        assert(false);
+        return lower;
+    }
+
     /*
      *  Splits along all axes
      */
     std::array<Region, 1 << N> subdivide() const
     {
-        assert(level > 0);
+        // If the region has a level, then it must be non-zero
+        //
+        // Subdividing a no-level region is acceptable, because the
+        // level is an optional field, but if it is present, then it
+        // must be non-zero.
+        assert(level > 0 || level == -1);
 
         // Default-construct empty regions
         std::array<Region, 1 << N> out = {};
         auto c = center();
+        const auto new_level = (level == -1) ? -1 : (level - 1);
 
         for (unsigned i=0; i < (1 << N); ++i)
         {
@@ -89,7 +108,7 @@ public:
                 a(j) = (i & (1 << j)) > 0;
             }
             out[i] = Region(a.select(c, lower), a.select(upper, c),
-                            perp, level - 1);
+                            perp, new_level);
         }
         return out;
     }
@@ -155,41 +174,6 @@ public:
     }
 
     /*
-     *  Returns a Region that contains this region as a specific child
-     *
-     *  For example, if this Region is any of the four quadrants,
-     *  then calling parent(i) where i is the quadrant number
-     *  will return the full four-quadrant Region.
-     *
-     *  |----------|----------|
-     *  |          |          |
-     *  |     2    |     3    |
-     *  |          |          |
-     *  |----------|----------|
-     *  |          |          |
-     *  |     0    |     1    |
-     *  |          |          |
-     *  |----------|----------|
-     */
-    Region<N> parent(unsigned parent_index) const
-    {
-        Region<N> out = *this;
-        out.level++;
-        for (unsigned i=0; i < N; ++i)
-        {
-            if (parent_index & (1 << i))
-            {
-                out.lower(i) -= out.upper(i) - out.lower(i);
-            }
-            else
-            {
-                out.upper(i) += out.upper(i) - out.lower(i);
-            }
-        }
-        return out;
-    }
-
-    /*
      *  Returns a region with only the masked axes present.
      *
      *  This is useful to reduce a 3D region into a region containing
@@ -241,8 +225,31 @@ public:
      */
     Region<N> withResolution(double min_feature) const {
         const auto min_dimension = (upper - lower).minCoeff();
-        const auto level = ceil(log(min_dimension / min_feature) / log(2));
+        const auto level = ceil(fmaxf(0.0f, logf(min_dimension / min_feature)) /
+                                logf(2));
         return Region<N>(lower, upper, perp, level);
+    }
+
+
+    /*  Finds the intersection of a ray with this region, setting *found to
+     *  true on success and false otherwise. */
+    Eigen::Array<double, N, 2> intersection(const Pt& pos, const Pt& dir,
+                                            bool* found) const
+    {
+        Eigen::Array<double, N, 2> out;
+        *found = false;
+        // Iterate over dimensions
+        for (unsigned i=0; i < N; ++i) {
+            for (unsigned j=0; j < 2; ++j) {
+                const double d = ((*this)[j][i] - pos[i]) / dir[i];
+                const Pt pt = pos + d * dir;
+                if (this->contains(pt, 0)) {
+                    out.col(*found) = pt;
+                    *found = true;
+                }
+            }
+        }
+        return out;
     }
 
     /*  Lower and upper bounds for the region  */
@@ -257,7 +264,8 @@ public:
     int32_t level;
 
     /*  Boilerplate for an object that contains an Eigen struct  */
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    ALIGNED_OPERATOR_NEW_AND_DELETE(Region)
+
 };
 
-}   // namespace Kernel
+}   // namespace libfive

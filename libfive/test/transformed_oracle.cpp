@@ -16,12 +16,12 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #include "libfive/oracle/oracle_storage.hpp"
 
 #include "libfive/eval/deck.hpp"
-#include "libfive/eval/eval_xtree.hpp"
+#include "libfive/eval/evaluator.hpp"
 
 #include "util/shapes.hpp"
 #include "util/oracles.hpp"
 
-using namespace Kernel;
+using namespace libfive;
 
 /*  In order to test the transformed primitives, we can't test that the meshing
  *  is identical when they're used, since numeric error can cause them not to
@@ -110,8 +110,8 @@ void compareUnderTransformation(Tree oracleTree, Tree controlTree,
          */
     }
     {
-        DerivEvaluator o(oDeck);
-        DerivEvaluator c(cDeck);
+        DerivArrayEvaluator o(oDeck);
+        DerivArrayEvaluator c(cDeck);
         for (unsigned i = 0; i < testPoints.size(); ++i)
         {
             auto oDeriv = o.deriv(testPoints[i]);
@@ -166,7 +166,7 @@ TEST_CASE("Rotated Oracle: Render and compare (cube as oracle)")
             Tree::Y() - 1.5)),
         max(-(Tree::Z() + 1.5),
             Tree::Z() - 1.5));
-    Tree cubeOracle(std::unique_ptr<CubeOracleClause>(new CubeOracleClause));
+    Tree cubeOracle(std::make_unique<CubeOracleClause>());
 
     compareUnderTransformation(cubeOracle, cube,
         [](Tree t) {return rotate2d(t, 10);},
@@ -197,7 +197,7 @@ TEST_CASE("Abs and skew applied to Oracle: "
 }
 
 TEST_CASE("Abs and skew applied to Oracle: "
-          "Render and compare (cube as oracle)", "[!mayfail]")
+          "Render and compare (cube as oracle)")
 {
     auto cube = max(max(
         max(-(Tree::X() + 1.5),
@@ -206,7 +206,7 @@ TEST_CASE("Abs and skew applied to Oracle: "
             Tree::Y() - 1.5)),
         max(-(Tree::Z() + 1.5),
             Tree::Z() - 1.5));
-    Tree cubeOracle(std::unique_ptr<CubeOracleClause>(new CubeOracleClause));
+    Tree cubeOracle(std::make_unique<CubeOracleClause>());
     compareUnderTransformation(cubeOracle, cube,
         [](Tree t) {
         return t.remap(Tree::Y(), Tree::X(),
@@ -264,7 +264,7 @@ TEST_CASE("Jacobian-0 transform and abs applied to Oracle: "
             Tree::Y() - 1.5)),
         max(-(Tree::Z() + 1.5),
             Tree::Z() - 1.5));
-    Tree cubeOracle(std::unique_ptr<CubeOracleClause>(new CubeOracleClause));
+    Tree cubeOracle(std::make_unique<CubeOracleClause>());
 
     compareUnderTransformation(cubeOracle, cube,
         [](Tree t) {

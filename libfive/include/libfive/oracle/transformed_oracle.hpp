@@ -9,9 +9,9 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #pragma once
 
 #include "libfive/oracle/oracle_storage.hpp"
-#include "libfive/eval/eval_complete.hpp"
+#include "libfive/eval/evaluator.hpp"
 
-namespace Kernel {
+namespace libfive {
 
 /* The transformedOracle is the result of applying a remap to an oracle.
 */
@@ -28,7 +28,7 @@ public:
      */
     void set(const Eigen::Vector3f& p, size_t index=0) override;
 
-    void evalInterval(Interval::I& out) override;
+    void evalInterval(Interval& out) override;
 
     void evalPoint(float& out, size_t index=0) override;
 
@@ -70,9 +70,9 @@ private:
     };
 
     const std::unique_ptr<Oracle> underlying;
-    CompleteEvaluator xEvaluator;
-    CompleteEvaluator yEvaluator;
-    CompleteEvaluator zEvaluator;
+    Evaluator xEvaluator;
+    Evaluator yEvaluator;
+    Evaluator zEvaluator;
 };
 
 

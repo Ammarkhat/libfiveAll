@@ -9,48 +9,62 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 #include "catch.hpp"
 
+#include "libfive/eval/evaluator.hpp"
+
 #include "libfive/render/brep/dc/dc_tree.hpp"
-#include "libfive/render/brep/dc/dc_pool.hpp"
+#include "libfive/render/brep/dc/dc_worker_pool.hpp"
+#include "libfive/render/brep/dc/dc_mesher.hpp"
 #include "libfive/render/brep/mesh.hpp"
+#include "libfive/render/brep/dual.hpp"
+#include "libfive/render/brep/settings.hpp"
 
 #include "util/shapes.hpp"
 
-using namespace Kernel;
+using namespace libfive;
 
-TEST_CASE("DCPool::build (progress callback)")
+class TestProgressHandler : public ProgressHandler {
+public:
+    void progress(double d) override {
+        ps.push_back(d);
+    }
+    std::vector<float> ps;
+};
+
+TEST_CASE("DCWorkerPool::build (progress callback)")
 {
     Tree sponge = max(menger(2), -sphere(1, {1.5, 1.5, 1.5}));
     Region<3> r({-2.5, -2.5, -2.5}, {2.5, 2.5, 2.5});
 
     for (auto res: {0.02, 0.03, 0.05, 0.1, 0.11, 0.125})
     {
-        std::vector<float> ps;
-        auto callback = [&](float f) {
-            ps.push_back(f);
-        };
+        BRepSettings settings;
+        settings.min_feature = res;
+        TestProgressHandler handler;
+        handler.start({1});
+        settings.progress_handler = &handler;
 
-        DCPool<3>::build(sponge, r, res, 1e-8, 8, callback);
+        DCWorkerPool<3>::build(sponge, r, settings);
+        handler.finish();
 
-        CAPTURE(ps.size());
-        CAPTURE(ps);
+        CAPTURE(handler.ps.size());
+        CAPTURE(handler.ps);
         CAPTURE(res);
 
-        REQUIRE(ps.size() >= 2);
-        REQUIRE(ps[0] == 0.0f);
-        REQUIRE(ps[ps.size() - 1] == 1.0f);
+        REQUIRE(handler.ps.size() >= 2);
+        REQUIRE(handler.ps[0] == 0.0f);
 
         // Check that the values are monotonically increasing
         float prev = -1;
-        for (auto& p : ps)
+        for (auto& p : handler.ps)
         {
             REQUIRE(p > prev);
             prev = p;
         }
 
-        if (ps.size() > 2)
+        if (handler.ps.size() > 2)
         {
-            REQUIRE(ps[ps.size() - 2] > 0.0f);
-            REQUIRE(ps[ps.size() - 2] < 1.0f);
+            REQUIRE(handler.ps[handler.ps.size() - 2] > 0.0f);
+            REQUIRE(handler.ps[handler.ps.size() - 2] < 1.0f);
         }
         else
         {
@@ -64,34 +78,52 @@ TEST_CASE("Mesh::render (progress callback)")
     Tree sponge = max(menger(2), -sphere(1, {1.5, 1.5, 1.5}));
     Region<3> r({-2.5, -2.5, -2.5}, {2.5, 2.5, 2.5});
 
+    BRepSettings settings;
+
     for (auto res: {0.02, 0.03, 0.05, 0.1, 0.11, 0.125})
     {
-        std::vector<float> ps;
-        auto callback = [&](float f) {
-            ps.push_back(f);
-        };
+        TestProgressHandler progress;
+        settings.progress_handler = &progress;
 
-        Mesh::render(sponge, r, res, 1e-8, true, callback);
+        settings.min_feature = res;
+        Mesh::render(sponge, r, settings);
 
-        CAPTURE(ps.size());
-        CAPTURE(ps);
+        CAPTURE(progress.ps.size());
+        CAPTURE(progress.ps);
         CAPTURE(res);
 
-        REQUIRE(ps.size() >= 2);
-        REQUIRE(ps[0] == 0.0f);
-        REQUIRE(ps[ps.size() - 1] == 3.0f);
+        REQUIRE(progress.ps.size() >= 2);
+        REQUIRE(progress.ps[0] == 0.0f);
+        REQUIRE(progress.ps[progress.ps.size() - 1] > 0.6666f);
 
         // Check that the values are monotonically increasing
         float prev = -1;
-        for (auto& p : ps)
+        for (auto& p : progress.ps)
         {
             REQUIRE(p > prev);
             prev = p;
         }
-
-        if (ps.size() <= 4)
-        {
-            WARN("Callbacks not triggered (this is expected in debug builds)");
-        }
     }
+}
+
+TEST_CASE("Mesh::render (early destruction of progress watcher)")
+{
+    Region<3> r({ -5, -5, -5 }, { 5, 5, 5 });
+
+    Root<DCTree<3>> t;
+    BRepSettings settings;
+    settings.min_feature = 0.25;
+    {
+        TestProgressHandler progress;
+        settings.progress_handler = &progress;
+        progress.start({1, 1, 1});
+
+        t = DCWorkerPool<3>::build(sphereGyroid(), r, settings);
+
+        std::unique_ptr<Mesh> m;
+        m = Dual<3>::walk<DCMesher>(t, settings);
+        t.reset(settings);
+        // Destructor runs here
+    }
+    REQUIRE(true);
 }

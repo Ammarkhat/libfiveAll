@@ -18,20 +18,21 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #include <Eigen/Eigen>
 #include <Eigen/StdVector>
 
-#include "libfive/export.hpp"
-#include "libfive/eval/eval_xtree.hpp"
+#include "libfive/eval/evaluator.hpp"
 
 #include "libfive/render/brep/util.hpp"
 #include "libfive/render/brep/xtree.hpp"
 #include "libfive/render/brep/object_pool.hpp"
 #include "libfive/render/brep/simplex/qef.hpp"
 #include "libfive/render/brep/simplex/surface_edge_map.hpp"
+#include "libfive/render/brep/default_new_delete.hpp"
 
-namespace Kernel {
+namespace libfive {
 
 /* Forward declarations */
 template <unsigned N> class SimplexNeighbors;
 template <unsigned N> class Region;
+struct BRepSettings;
 
 template <unsigned N>
 struct SimplexLeafSubspace {
@@ -45,7 +46,7 @@ struct SimplexLeafSubspace {
     bool inside;
 
     /*   Global indices for subspace vertices  */
-    std::atomic_uint64_t index;
+    std::atomic<uint64_t> index;
 
     /*  Per-subspace QEF */
     QEF<N> qef;
@@ -55,9 +56,9 @@ struct SimplexLeafSubspace {
      *  at a time (since they represent shared spaces).  We use a
      *  homebrew reference counting system to avoid releasing them to
      *  the pool while they're still in use.  */
-    std::atomic_uint32_t refcount;
+    std::atomic<uint32_t> refcount;
 
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    ALIGNED_OPERATOR_NEW_AND_DELETE(SimplexLeafSubspace)
 };
 
 template <unsigned N>
@@ -87,14 +88,7 @@ struct SimplexLeaf
      *  ordered map. */
     SurfaceEdgeMap<32> surface;
 
-    /*  Required for ObjectPool, but we're just using the default operators
-     *  here because there are no alignment requirements. */
-    static void* operator new[](std::size_t sz) {
-        return ::operator new[](sz);
-    }
-    void operator delete[]( void* ptr ) {
-        ::operator delete[](ptr);
-    }
+    DEFAULT_OPERATORS_NEW_AND_DELETE
 
     /*  Represents how far from minimum-size leafs we are */
     unsigned level;
@@ -104,8 +98,9 @@ template <unsigned N>
 class SimplexTree : public XTree<N, SimplexTree<N>, SimplexLeaf<N>>
 {
 public:
-    using Leaf = SimplexLeaf<N>;
-    using Pool = ObjectPool<SimplexTree<N>, Leaf, SimplexLeafSubspace<N>>;
+    using Pool = ObjectPool<SimplexTree<N>,
+                            SimplexLeaf<N>,
+                            SimplexLeafSubspace<N>>;
 
     /*
      *  Simple constructor
@@ -136,9 +131,8 @@ public:
      *
      *  Returns a shorter version of the tape that ignores unambiguous clauses.
      */
-    std::shared_ptr<Tape> evalInterval(XTreeEvaluator* eval,
-                                       std::shared_ptr<Tape> tape,
-                                       const Region<N>& region,
+    std::shared_ptr<Tape> evalInterval(Evaluator* eval,
+                                       const std::shared_ptr<Tape>& tape,
                                        Pool& object_pool);
 
     /*
@@ -146,9 +140,8 @@ public:
      *  Sets type to FILLED / EMPTY / AMBIGUOUS based on the corner values.
      *  Then, solves for vertex position, populating AtA / AtB / BtB.
      */
-    void evalLeaf(XTreeEvaluator* eval,
-                  std::shared_ptr<Tape> tape,
-                  const Region<N>& region,
+    void evalLeaf(Evaluator* eval,
+                  const std::shared_ptr<Tape>& tape,
                   Pool& object_pool,
                   const SimplexNeighbors<N>& neighbors);
 
@@ -158,9 +151,8 @@ public:
      *
      *  Returns false if any children are yet to come, true otherwise.
      */
-    bool collectChildren(XTreeEvaluator* eval,
-                         std::shared_ptr<Tape> tape,
-                         const Region<N>& region,
+    bool collectChildren(Evaluator* eval,
+                         const std::shared_ptr<Tape>& tape,
                          Pool& object_pool,
                          double max_err);
 
@@ -181,9 +173,10 @@ public:
      *  Assigns leaf->sub[*]->index to a array of unique integers for every leaf
      *  in the tree, starting at 1.  This provides a globally unique
      *  identifier for every subspace vertex, which is used when making edges.
+     *
+     *  Settings are used for cancellation and worker count.
      */
-    void assignIndices(unsigned workers, std::atomic_bool& cancel) const;
-    void assignIndices() const;
+    void assignIndices(const BRepSettings& settings) const;
 
     /*
      *  Releases this tree and any leaf objects to the given object pool
@@ -191,19 +184,23 @@ public:
     void releaseTo(Pool& object_pool);
 
     /*  Boilerplate for an object that contains an Eigen struct  */
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    ALIGNED_OPERATOR_NEW_AND_DELETE(SimplexTree)
 
     /*  Helper typedef for N-dimensional column vector */
     typedef Eigen::Matrix<double, N, 1> Vec;
+
+    static bool hasSingletons() { return false; }
+    static SimplexTree<N>* singletonEmpty() { return nullptr; }
+    static SimplexTree<N>* singletonFilled() { return nullptr; }
+    static bool isSingleton(const SimplexTree<N>*) { return false; }
 
 protected:
     /*
      *  Calculate and store whether each vertex is inside or outside
      *  This populates leaf->sub[i]->inside, for i in 0..ipow(3, N)
      */
-    void saveVertexSigns(XTreeEvaluator* eval,
-                         Tape::Handle tape,
-                         const Region<N>& region,
+    void saveVertexSigns(Evaluator* eval,
+                         const Tape::Handle& tape,
                          const std::array<bool, ipow(3, N)>& already_solved);
 
     /*
@@ -220,9 +217,8 @@ protected:
      *  are initialized to zero, because they'll be constructed by accumulation
      *  as we walk up the tree.
      */
-    void findLeafVertices(XTreeEvaluator* eval,
-                          Tape::Handle tape,
-                          const Region<N>& region,
+    void findLeafVertices(Evaluator* eval,
+                          const Tape::Handle& tape,
                           Pool& object_pool,
                           const SimplexNeighbors<N>& neighbors);
 
@@ -232,12 +228,6 @@ protected:
      *  simultaneously!
      */
     std::array<SimplexLeafSubspace<N>*, ipow(3, N)> getLeafSubs() const;
-
-    /*  Eigenvalue threshold for determining feature rank  */
-    constexpr static double EIGENVALUE_CUTOFF=0.1f;
 };
 
-extern template class SimplexTree<2>;
-extern template class SimplexTree<3>;
-
-}   // namespace Kernel
+}   // namespace libfive

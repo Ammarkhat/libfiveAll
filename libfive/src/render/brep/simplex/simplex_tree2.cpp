@@ -7,10 +7,11 @@ This Source Code Form is subject to the terms of the Mozilla Public
 License, v. 2.0. If a copy of the MPL was not distributed with this file,
 You can obtain one at http://mozilla.org/MPL/2.0/.
 */
-#include "simplex_tree.cpp"
+#include "simplex_tree.inl"
+#include "../object_pool.inl"
 
-namespace Kernel {
+namespace libfive {
 template class SimplexTree<2>;
 template struct SimplexLeaf<2>;
-}   // namespace Kernel
-
+template struct SimplexLeafSubspace<2>;
+}   // namespace libfive

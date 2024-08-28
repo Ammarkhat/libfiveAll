@@ -7,9 +7,9 @@ This Source Code Form is subject to the terms of the Mozilla Public
 License, v. 2.0. If a copy of the MPL was not distributed with this file,
 You can obtain one at http://mozilla.org/MPL/2.0/.
 */
-#include "dc_tree.cpp"
+#include "dc_tree.inl"
 
-namespace Kernel {
+namespace libfive {
 
 ////////////////////////////////////////////////////////////////////////////////
 // Specializations for octree
@@ -153,21 +153,8 @@ bool DCTree<3>::cornersAreManifold(const uint8_t corner_mask)
     return corner_table[corner_mask];
 }
 
-template <>
-const std::vector<std::pair<uint8_t, uint8_t>>& DCTree<3>::edges() const
-{
-    static const std::vector<std::pair<uint8_t, uint8_t>> es =
-        {{0, Axis::X}, {0, Axis::Y}, {0, Axis::Z},
-         {Axis::X, Axis::X|Axis::Y}, {Axis::X, Axis::X|Axis::Z},
-         {Axis::Y, Axis::Y|Axis::X}, {Axis::Y, Axis::Y|Axis::Z},
-         {Axis::X|Axis::Y, Axis::X|Axis::Y|Axis::Z},
-         {Axis::Z, Axis::Z|Axis::X}, {Axis::Z, Axis::Z|Axis::Y},
-         {Axis::Z|Axis::X, Axis::Z|Axis::X|Axis::Y},
-         {Axis::Z|Axis::Y, Axis::Z|Axis::Y|Axis::X}};
-    return es;
-}
-
 // Explicit initialization of template
 template class DCTree<3>;
+template struct DCLeaf<3>;
 
-}   // namespace Kernel
+}   // namespace libfive

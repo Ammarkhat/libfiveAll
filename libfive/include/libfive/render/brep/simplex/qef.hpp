@@ -13,12 +13,13 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #include "libfive/render/brep/util.hpp"
 #include "libfive/render/brep/region.hpp"
 #include "libfive/render/brep/indexes.hpp"
+#include "libfive/render/brep/default_new_delete.hpp"
 
 #ifdef LIBFIVE_VERBOSE_QEF_DEBUG
 #include <iostream>
 #endif
 
-namespace Kernel {
+namespace libfive {
 
 /*
  *  This is documented in a long article at
@@ -30,6 +31,7 @@ class QEF
 public:
     struct Solution {
         Eigen::Matrix<double, N, 1> position;
+        Eigen::Matrix<bool, N, 1> constrained;
         double value;
         unsigned rank;
         double error;
@@ -55,16 +57,30 @@ public:
         return *this;
     }
 
+    QEF& operator/=(const double& other) {
+        AtA /= other;
+        AtBp /= other;
+        BptBp /= other;
+
+        return *this;
+    }
+
     void reset() {
         AtA = Matrix::Zero();
         AtBp = Matrix::Zero();
         BptBp = Matrix::Zero();
     }
 
+    /*  Inserts a new sample into the QEF.  If the normal has
+     *  non-finite values, it's replaced with an all-zeros normal
+     *  before insertion. */
     void insert(Eigen::Matrix<double, 1, N> position,
                 Eigen::Matrix<double, 1, N> normal,
                 double value)
     {
+        if (!normal.array().isFinite().all()) {
+            normal.array() = 0.0;
+        }
         RowVector ni;
         RowVector pi;
 
@@ -93,6 +109,7 @@ public:
         out.position = sol.value.template head<N>();
         out.value = sol.value(N);
         out.rank = sol.rank - 1; // Skip the rank due to value
+        out.constrained.array() = false;
 
         // Calculate the resulting error, hard-code the matrix size here so
         // that Eigen checks that all of our types are correct.
@@ -226,8 +243,10 @@ public:
                 out.position(i) = (Neighbor.pos() & (1 << i))
                     ? region.upper(i)
                     : region.lower(i);
+                out.constrained(i) = true;
             } else {
                 out.position(i) = sol.value(r++);
+                out.constrained(i) = false;
             }
         }
         out.value = sol.value(r);
@@ -247,6 +266,44 @@ public:
 
         return out;
     }
+
+    /*
+     *  Solves the equivalent DC QEF, which tries to find the point
+     *  where all of the planes intersect at a distance-field value of 0
+     */
+    Solution solveDC(Eigen::Matrix<double, 1, N> target_pos=
+                         Eigen::Matrix<double, 1, N>::Zero()) const;
+
+    /*  Returns the rank of the DC matrix subset.
+     *
+     *  This assumes that the normals have been normalized, because it uses an
+     *  absolute threshold to decide when to discard eigenvalues. */
+    unsigned rankDC() const
+    {
+        // Pick out the DC subset of the matrix
+        Eigen::Matrix<double, N, N> AtA_c = AtA.template topLeftCorner<N, N>();
+
+        // Use the same logic as `static RawSolution solve()`, but
+        // only accumulate the rank with an absolute threshold.
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double, N, N>> es(AtA_c);
+        auto eigenvalues = es.eigenvalues().real();
+
+        unsigned rank = 0;
+        for (unsigned i=0; i < N; ++i) {
+            if (fabs(eigenvalues[i]) > 0.1) {
+                rank++;
+            }
+        }
+        return rank;
+    }
+
+    /*
+     *  Returns the direction of travel which produces the minimum QEF error.
+     *
+     *  For a DC QEF that's on an edge, this is equivalent to the edge's
+     *  direction, which is useful for sliding vertices into their cells.
+     */
+    Eigen::Matrix<double, N, 1> slideDC() const;
 
     /*
      *  A bit of magic matrix math to extract the distance value
@@ -300,8 +357,13 @@ public:
         }
 
         // Construct an empty solution object with infinite error
-        Solution out;
-        out.error = std::numeric_limits<double>::infinity();
+        // (and dummy values for other fields)
+        Solution out = {
+            Eigen::Matrix<double, N, 1>::Zero(), /* positions */
+            Eigen::Matrix<bool, N, 1>::Zero(), /* constrained */
+            std::nan(""), /* value */
+            0, /* rank */
+            std::numeric_limits<double>::infinity()}; /* error */
 
         // Do static loop unrolling to check every smaller dimension
         // (e.g. for a cell, check every face, then every edge, then
@@ -314,6 +376,58 @@ public:
         return out;
     }
 
+    /*  Calculates the QEF error for a given position + value. */
+    double error(const Eigen::Matrix<double, N, 1>& pos,
+                 const double value) const {
+        Vector v;
+        v << pos, value;
+        Eigen::Matrix<double, 1, 1> err =
+            v.transpose() * AtA * v -
+            2 * v.transpose() * AtB() +
+            BtB();
+        return err(0);
+    }
+
+    /*  Calculates the QEF error for a given position, with value allowed
+     *  to float and minimize the error.  This is equivalent to doing a
+     *  constrained solve with the position fixed. */
+    Solution minimizeErrorAt(const Eigen::Matrix<double, N, 1>& pos) const {
+        // This is based on solveConstrained above, specialized
+        // to constrain all of the position axes and let the
+        // value axis float.
+        Eigen::Matrix<double, 1, 1> AtA_c;
+        Eigen::Matrix<double, 1, 1> AtB_c;
+        Eigen::Matrix<double, 1, 1> target_c;
+
+        // Cache the AtB calculation so we only do it once
+        const auto AtB_ = AtB();
+
+        AtB_c(0) = AtB_(N);
+        AtA_c(0, 0) = AtA(N, N);
+        target_c(0) = 0.0;
+        for (unsigned col=0; col < N; ++col) {
+            AtB_c(0) -= AtA(N, col) * pos(col);
+        }
+
+        // TODO:  This is probably reducible to a single division, since
+        // it's all one-coefficient arrays.
+        auto sol = QEF<0>::solve(AtA_c, AtB_c, target_c);
+
+        Vector v;
+        v << pos, sol.value(0);
+        Eigen::Matrix<double, 1, 1> err =
+            v.transpose() * AtA * v -
+            2 * v.transpose() * AtB_ +
+            BtB();
+
+        Solution out;
+        out.position = pos;
+        out.constrained.array() = true;
+        out.value = sol.value(0);
+        out.rank = 0;
+        out.error = err(0);
+        return out;
+    }
 
 protected:
     /*
@@ -433,7 +547,9 @@ protected:
     static RawSolution solve(
             const Matrix& AtA,
             const Vector& AtB,
-            const Vector& target)
+            const Vector& target,
+            const double eigenvalue_cutoff_relative=1e-12,
+            const double eigenvalue_cutoff_absolute=0)
     {
         // Our high-level goal here is to find the pseduo-inverse of AtA,
         // with special handling for when it isn't of full rank.
@@ -444,10 +560,14 @@ protected:
         Matrix D = Matrix::Zero();
         const double max_eigenvalue = eigenvalues.cwiseAbs().maxCoeff();
 
-        const double EIGENVALUE_CUTOFF = 1e-12;
         unsigned rank = 0;
         for (unsigned i=0; i < N + 1; ++i) {
-            if (fabs(eigenvalues[i]) / max_eigenvalue > EIGENVALUE_CUTOFF) {
+            const auto e = fabs(eigenvalues[i]);
+            if ((eigenvalue_cutoff_relative &&
+                 e / max_eigenvalue > eigenvalue_cutoff_relative) ||
+                (eigenvalue_cutoff_absolute &&
+                 e > eigenvalue_cutoff_absolute))
+            {
                 D.diagonal()[i] = 1 / eigenvalues[i];
                 rank++;
             }
@@ -490,7 +610,7 @@ protected:
     Matrix AtBp;
     Matrix BptBp;
 
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    ALIGNED_OPERATOR_NEW_AND_DELETE(QEF)
 
     friend class QEF<0>;
     friend class QEF<1>;
@@ -498,4 +618,67 @@ protected:
     friend class QEF<3>;
 };
 
-}   // namespace Kernel
+template <>
+inline typename QEF<0>::Solution QEF<0>::solveDC(Eigen::Matrix<double, 1, 0>) const
+{
+    Solution sol;
+    sol.value = 0.0;
+    sol.rank = 0;
+    return sol;
+}
+
+template <unsigned N>
+inline typename QEF<N>::Solution QEF<N>::solveDC(Eigen::Matrix<double, 1, N> target_pos) const
+{
+    // Cache the AtB calculation so we only do it once
+    const auto AtB_ = AtB();
+
+    Eigen::Matrix<double, N, N> AtA_c =
+        AtA.template topLeftCorner<N, N>();
+    Eigen::Matrix<double, N, 1> AtB_c =
+        AtB_.template topRows<N>();
+    Eigen::Matrix<double, N, 1> target_c =
+        target_pos.transpose();
+
+    auto sol = QEF<N - 1>::solve(
+            AtA_c, AtB_c, target_c, 0, 0.1);
+
+    Solution out;
+    out.position = sol.value;
+    out.value = 0.0;
+    out.rank = sol.rank;
+
+    // Calculate the resulting error, hard-coding the matrix size here so
+    // that Eigen checks that all of our types are correct.
+    // This error calculation uses the unconstrained matrices to return
+    // a true error, rather than a weird value that could be < 0.
+    Vector v;
+    v << out.position, out.value;
+    Eigen::Matrix<double, 1, 1> err =
+        v.transpose() * AtA * v -
+        2 * v.transpose() * AtB_ +
+        BtB();
+    out.error = err(0);
+
+    return out;
+}
+
+template <>
+inline Eigen::Matrix<double, 0, 1> QEF<0>::slideDC() const {
+    return {};
+}
+
+template <unsigned N>
+inline Eigen::Matrix<double, N, 1> QEF<N>::slideDC() const {
+    // Pick out the DC subset of the matrix
+    Eigen::Matrix<double, N, N> AtA_c = AtA.template topLeftCorner<N, N>();
+
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double, N, N>> es(AtA_c);
+    unsigned i;
+    es.eigenvalues().minCoeff(&i);
+
+    return es.eigenvectors().col(i);
+}
+
+
+}   // namespace libfive

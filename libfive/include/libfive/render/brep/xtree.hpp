@@ -14,7 +14,7 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #include "libfive/eval/interval.hpp"
 #include "libfive/render/brep/region.hpp"
 
-namespace Kernel {
+namespace libfive {
 
 template <unsigned N, typename T, typename L>
 class XTree
@@ -48,6 +48,11 @@ public:
      *  Walks the tree, resetting pending to its initial value of (1 << N) - 1
      */
     void resetPending() const;
+
+    /*
+     *  Sets type and calls done()
+     */
+    void setType(Interval::State t);
 
     /*  Parent tree, or nullptr if this is the root */
     T* parent;
@@ -86,8 +91,12 @@ protected:
     /*
      *  Call this when construction is complete; it will atomically install
      *  this tree into the parent's array of children pointers.
+     *
+     *  Returns true if instead it has installed a singleton into the parent's
+     *  array, which happens if a tree type's hasSingletons() is true and the
+     *  given tree is empty or filled.
      */
-    void done();
+    bool done();
 };
 
-}   // namespace Kernel
+}   // namespace libfive

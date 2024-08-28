@@ -19,7 +19,7 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 
 #include "libfive/oracle/oracle_context.hpp"
 
-namespace Kernel {
+namespace libfive {
 
 /* The oracle is an interface class for the use of externally defined oracles
  * as primitives in trees.
@@ -44,10 +44,11 @@ public:
                      const Eigen::Vector3f& upper)=0;
 
     /*
-     *  Return the result of interval arithmetic over the range
-     *  previously defined with set(Interval::I)
+     *  Return the result of interval arithmetic over the range previously
+     *  defined with set(Interval).  If the output range could include
+     *  NaN, the oracle must return the interval {NaN, NaN}.
      */
-    virtual void evalInterval(Interval::I& out)=0;
+    virtual void evalInterval(Interval& out)=0;
 
     /*
      *  Re-implemented by subclasses to return a context that specializes
@@ -58,16 +59,6 @@ public:
     {
         (void)t;
         return std::shared_ptr<OracleContext>(nullptr);
-    }
-
-    /*
-     *  Returns whether interval arithmetic over the previously defined range
-     *  can result in a NaN.
-     */
-
-    virtual void evalIntervalNaN(bool& out)
-    {
-      out = false;
     }
 
     /*
@@ -95,10 +86,14 @@ public:
 
     /*
      *  Sets appropriate bits to 1 if the given point (as set with
-     *  set(Eigen::Vector3f, i) and evaluated with evaluArray) is ambiguous.
+     *  set(Eigen::Vector3f, i) and evaluated with evalArray) is ambiguous.
      *
-     *  This function must only be called after evalArray is called
-     *  (with the same result block size)
+     *  This function should set bits to indicate ambiguity in the oracle,
+     *  but should not clear bits (as they may have been set by other oracles
+     *  or evaluators).
+     *
+     *  It must only be called after evalArray is called
+     *  (with the same result block size).
      */
     virtual void checkAmbiguous(
             Eigen::Block<Eigen::Array<bool, 1, LIBFIVE_EVAL_ARRAY_SIZE>,

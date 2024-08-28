@@ -13,10 +13,11 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #include "libfive/eval/base.hpp"
 #include "libfive/eval/deck.hpp"
 #include "libfive/eval/eval_array_size.hpp"
+#include "libfive/render/brep/default_new_delete.hpp"
 
-namespace Kernel {
+namespace libfive {
 
-class ArrayEvaluator : public BaseEvaluator
+class ArrayEvaluator : public virtual BaseEvaluator
 {
 public:
     ArrayEvaluator(const Tree& root);
@@ -32,9 +33,9 @@ public:
      */
     void set(const Eigen::Vector3f& p, size_t index)
     {
-        f(deck->X, index) = p.x();
-        f(deck->Y, index) = p.y();
-        f(deck->Z, index) = p.z();
+        v(deck->X, index) = p.x();
+        v(deck->Y, index) = p.y();
+        v(deck->Z, index) = p.z();
 
         for (auto& o : deck->oracles)
         {
@@ -42,16 +43,34 @@ public:
         }
     }
 
+    /*
+     *  Helper function to reduce boilerplate in functions which work
+     *  in arbitrary dimensions and with double-precision values.
+     */
+    template <unsigned N>
+    void set(const Eigen::Matrix<double, N, 1>& p, const Region<N>& region,
+             size_t index)
+    {
+        Eigen::Vector3f v;
+        v << p.template cast<float>(), region.perp.template cast<float>();
+        set(v, index);
+    }
+
     /*  This is the number of samples that we can process in one pass */
     static constexpr size_t N=LIBFIVE_EVAL_ARRAY_SIZE;
 
 protected:
     /*  Stored in values() and used in operator() to decide how much of the
-     *  array we're addressing at once  */
-    size_t count;
+     *  array we're addressing at once.  count_simd is rounded up to the
+     *  nearest SIMD block size; count_actual is the actual count. */
+    size_t count_simd;
+    size_t count_actual;
 
-    /*  f(clause, index) is a specific data point */
-    Eigen::Array<float, Eigen::Dynamic, N, Eigen::RowMajor> f;
+    /*  Sets count_simd and count_actual based on count */
+    void setCount(size_t count);
+
+    /*  v(clause, index) is a specific data point */
+    Eigen::Array<float, Eigen::Dynamic, N, Eigen::RowMajor> v;
 
     /*  ambig(index) returns whether a particular slot is ambiguous */
     Eigen::Array<bool, 1, N> ambig;
@@ -62,20 +81,29 @@ protected:
     void operator()(Opcode::Opcode op, Clause::Id id,
                     Clause::Id a, Clause::Id b);
 
-    /*
-     *  Sets this->count to count, rounding up to the appropriate SIMD
-     *  block size (because Eigen sometimes returns different results
-     *  depending on whether it took the SIMD or non-SIMD path).
-     */
-    void setCount(size_t count);
-
 public:
     /*
      *  Multi-point evaluation (values must be stored with set)
      */
-    Eigen::Block<decltype(f), 1, Eigen::Dynamic> values(size_t count);
-    Eigen::Block<decltype(f), 1, Eigen::Dynamic> values(
-            size_t count, std::shared_ptr<Tape> tape);
+    Eigen::Block<decltype(v), 1, Eigen::Dynamic> values(size_t count);
+    Eigen::Block<decltype(v), 1, Eigen::Dynamic> values(
+            size_t count, const Tape& tape);
+
+    /*
+     *  Single-point evaluation
+     *  Invalidates slot 0 in the data and results array
+     */
+    float value(const Eigen::Vector3f& pt);
+    float value(const Eigen::Vector3f& pt, const Tape& tape);
+
+    /*
+     *  Evaluates a single point and returns a tape that doesn't
+     *  contain branches that weren't taken by that point evaluation.
+     */
+    std::pair<float, std::shared_ptr<Tape>> valueAndPush(
+            const Eigen::Vector3f& pt);
+    std::pair<float, std::shared_ptr<Tape>> valueAndPush(
+            const Eigen::Vector3f& pt, const std::shared_ptr<Tape>& tape);
 
     /*
      *  Changes a variable's value
@@ -92,14 +120,12 @@ public:
      */
     Eigen::Block<decltype(ambig), 1, Eigen::Dynamic> getAmbiguous(size_t i);
     Eigen::Block<decltype(ambig), 1, Eigen::Dynamic> getAmbiguous(
-            size_t i, std::shared_ptr<Tape> tape);
+            size_t i, const Tape& tape);
 
     /*  Make an aligned new operator, as this class has Eigen structs
      *  inside of it (which are aligned for SSE) */
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-
-    friend class Tape; // for rwalk<ArrayEvaluator>
+    ALIGNED_OPERATOR_NEW_AND_DELETE(ArrayEvaluator)
 };
 
-}   // namespace Kernel
+}   // namespace libfive
 

@@ -11,7 +11,7 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 
 #include "libfive/render/brep/indexes.hpp"
 
-using namespace Kernel;
+using namespace libfive;
 
 TEST_CASE("NeighborIndex::dimension")
 {
@@ -81,8 +81,8 @@ TEST_CASE("NeighborIndex::fromPosAndFloating")
     for (int i=0; i < pow(3, 3); ++i)
     {
         NeighborIndex n(i);
-        CAPTURE(n.pos())
-        CAPTURE(n.floating())
+        CAPTURE(n.pos());
+        CAPTURE(n.floating());
         auto m = NeighborIndex::fromPosAndFloating(n.pos(), n.floating());
         REQUIRE(i == m.i);
     }

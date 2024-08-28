@@ -13,16 +13,20 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 
 #include "libfive/tree/opcode.hpp"
 #include "libfive/tree/tree.hpp"
+#include "libfive/tree/data.hpp"
 
-#include "libfive/eval/eval_point.hpp"
+#include "libfive/eval/eval_deriv_array.hpp"
 #include "libfive/eval/eval_interval.hpp"
-#include "libfive/eval/eval_deriv.hpp"
 
 #include "libfive/render/brep/region.hpp"
 // #include "libfive/render/brep/contours.hpp"
 #include "libfive/render/brep/mesh.hpp"
+#include "libfive/render/brep/settings.hpp"
 
-using namespace Kernel;
+// #include "libfive/render/discrete/voxels.hpp"
+// #include "libfive/render/discrete/heightmap.hpp"
+
+using namespace libfive;
 
 void libfive_mesh_delete(libfive_mesh* m)
 {
@@ -66,32 +70,27 @@ int libfive_opcode_args(int op)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-libfive_tree libfive_tree_x() { return new Tree(Tree::X()); }
-libfive_tree libfive_tree_y() { return new Tree(Tree::Y()); }
-libfive_tree libfive_tree_z() { return new Tree(Tree::Z()); }
+libfive_tree libfive_tree_x() { return Tree::X().release(); }
+libfive_tree libfive_tree_y() { return Tree::Y().release(); }
+libfive_tree libfive_tree_z() { return Tree::Z().release(); }
 
-libfive_tree libfive_tree_const(float f) { return new Tree(f); }
-libfive_tree libfive_tree_var() { return new Tree(Tree::var()); }
+libfive_tree libfive_tree_const(float f) { return Tree(f).release(); }
+libfive_tree libfive_tree_var() { return Tree::var().release(); }
 
 bool libfive_tree_is_var(libfive_tree t)
 {
-    return (*t)->op == Opcode::VAR_FREE;
+    return t->op() == Opcode::VAR_FREE;
 }
 
 float libfive_tree_get_const(libfive_tree t, bool* success)
 {
-    if ((*t)->op == Opcode::CONSTANT)
+    if (t->op() == Opcode::CONSTANT)
     {
         if (success) { *success = true; }
-        return (*t)->value;
+        return t->value();
     }
     if (success) { *success = false; }
     return 0;
-}
-
-libfive_tree libfive_tree_constant_vars(libfive_tree t)
-{
-    return new Tree(t->makeVarsConstant());
 }
 
 static bool opcode_is_valid(int op, size_t expected_args)
@@ -101,34 +100,37 @@ static bool opcode_is_valid(int op, size_t expected_args)
            Opcode::args(Opcode::Opcode(op)) == expected_args;
 }
 
-libfive_tree libfive_tree_nonary(int op)
+libfive_tree libfive_tree_nullary(int op)
 {
     return opcode_is_valid(op, 0)
-        ? new Tree(Opcode::Opcode(op))
+        ? Tree::nullary(Opcode::Opcode(op)).release()
         : nullptr;
 }
 
 libfive_tree libfive_tree_unary(int op, libfive_tree a)
 {
     return (opcode_is_valid(op, 1) && a != nullptr)
-        ? new Tree(Opcode::Opcode(op), *a)
+        ? Tree::unary(Opcode::Opcode(op), Tree(a)).release()
         : nullptr;
 }
+
 libfive_tree libfive_tree_binary(int op, libfive_tree a, libfive_tree b)
 {
     return (opcode_is_valid(op, 2) && a != nullptr && b != nullptr)
-        ? new Tree(Opcode::Opcode(op), *a, *b)
+        ? Tree::binary(Opcode::Opcode(op), Tree(a), Tree(b)).release()
         : nullptr;
 }
 
 const void* libfive_tree_id(libfive_tree t)
 {
-    return static_cast<const void*>(t->id());
+    return static_cast<const void*>(t);
 }
 
 void libfive_tree_delete(libfive_tree ptr)
 {
-    delete ptr;
+    // Reclaim the ptr (without incrementing the refcount), which
+    // then decrements the refcount when the Tree destructor is run.
+    Tree::reclaim(ptr);
 }
 
 // bool libfive_tree_save(libfive_tree ptr, const char* filename)
@@ -164,18 +166,22 @@ void libfive_tree_delete(libfive_tree ptr)
 
 libfive_tree libfive_tree_remap(libfive_tree p, libfive_tree x, libfive_tree y, libfive_tree z)
 {
-    return new Tree(p->remap(*x, *y, *z));
+    return Tree(p).remap(Tree(x), Tree(y), Tree(z)).release();
+}
+
+libfive_tree libfive_tree_optimized(libfive_tree t) {
+    return Tree(t).optimized().release();
 }
 
 float libfive_tree_eval_f(libfive_tree t, libfive_vec3 p)
 {
-    PointEvaluator e(*t);
-    return e.eval({p.x, p.y, p.z});
+    ArrayEvaluator e((Tree(t)));
+    return e.value({p.x, p.y, p.z});
 }
 
 libfive_interval libfive_tree_eval_r(libfive_tree t, libfive_region3 r)
 {
-    IntervalEvaluator e(*t);
+    IntervalEvaluator e((Tree(t)));
     auto i = e.eval({r.X.lower, r.Y.lower, r.Z.lower},
                     {r.X.upper, r.Y.upper, r.Z.upper});
     return {i.lower(), i.upper()};
@@ -183,7 +189,7 @@ libfive_interval libfive_tree_eval_r(libfive_tree t, libfive_region3 r)
 
 libfive_vec3 libfive_tree_eval_d(libfive_tree t, libfive_vec3 p)
 {
-    DerivEvaluator e(*t);
+    DerivArrayEvaluator e((Tree(t)));
     auto v = e.deriv({p.x, p.y, p.z});
     return {v.x(), v.y(), v.z()};
 }
@@ -203,6 +209,10 @@ bool libfive_tree_eq(libfive_tree a, libfive_tree b)
 //     memcpy(out, str.c_str(), str.size() + 1);
 //     return out;
 // }
+
+void libfive_free_str(char* ptr) {
+    free(ptr);
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -243,11 +253,12 @@ bool libfive_tree_eq(libfive_tree a, libfive_tree b)
 //     cs->saveSVG(f);
 // }
 
-libfive_mesh* libfive_tree_render_mesh(libfive_tree tree, libfive_region3 R, float res)
+libfive_mesh* libfive_tree_render_mesh_(libfive_tree tree, libfive_region3 R,
+                                        const BRepSettings& settings)
 {
     Region<3> region({R.X.lower, R.Y.lower, R.Z.lower},
                      {R.X.upper, R.Y.upper, R.Z.upper});
-    auto ms = Mesh::render(*tree, region, 1/res);
+    auto ms = Mesh::render(Tree(tree), region, settings);
     if (ms.get() == nullptr)
     {
         fprintf(stderr, "libfive_tree_render_mesh: got empty mesh\n");
@@ -277,25 +288,166 @@ libfive_mesh* libfive_tree_render_mesh(libfive_tree tree, libfive_region3 R, flo
     return out;
 }
 
-// bool libfive_tree_save_mesh(libfive_tree tree, libfive_region3 R, float res, const char* f)
-// {
-//     Region<3> region({R.X.lower, R.Y.lower, R.Z.lower},
-//                      {R.X.upper, R.Y.upper, R.Z.upper});
-//     auto ms = Mesh::render(*tree, region, 1/res);
-//     return ms->saveSTL(f);
-// }
+libfive_mesh* libfive_tree_render_mesh(libfive_tree tree, libfive_region3 R, float res) {
+  BRepSettings settings;
+  settings.min_feature = 1/res;
+  return libfive_tree_render_mesh_(tree, R, settings);
+}
+
+libfive_mesh* libfive_tree_render_mesh_st(libfive_tree tree, libfive_region3 R, float res) {
+  BRepSettings settings;
+  settings.min_feature = 1/res;
+  settings.workers = 1;
+  return libfive_tree_render_mesh_(tree, R, settings);
+}
+ 
+libfive_mesh_coords* libfive_tree_render_mesh_coords(libfive_tree tree,
+                                                     libfive_region3 R,
+                                                     float res)
+{
+    Region<3> region({R.X.lower, R.Y.lower, R.Z.lower},
+                     {R.X.upper, R.Y.upper, R.Z.upper});
+    BRepSettings settings;
+    settings.min_feature = 1/res;
+    auto ms = Mesh::render(Tree(tree), region, settings);
+    if (ms.get() == nullptr)
+    {
+        fprintf(stderr, "libfive_tree_render_mesh_coords: got empty mesh\n");
+        return nullptr;
+    }
+
+    auto out = new libfive_mesh_coords;
+    out->verts = new libfive_vec3[ms->verts.size()];
+    out->vert_count = ms->verts.size();
+    // need 4 times the count of triangles for coordinate indices
+    // (3 vertices separated by -1 for each triangle)
+    out->coord_indices = new int32_t[4 * ms->branes.size()];
+    out->coord_index_count = 4 * ms->branes.size();
+
+    size_t i;
+
+    i=0;
+    for (auto& v : ms->verts)
+    {
+        out->verts[i++] = {v.x(), v.y(), v.z()};
+    }
+
+    i=0;
+    for (auto& t : ms->branes)
+    {
+      out->coord_indices[i++] = (int32_t)t.x();
+      out->coord_indices[i++] = (int32_t)t.y();
+      out->coord_indices[i++] = (int32_t)t.z();
+      out->coord_indices[i++] = -1;
+    }
+
+    return out;
+}
+
+bool libfive_tree_save_mesh(libfive_tree tree, libfive_region3 R, float res, const char* f)
+{
+    Region<3> region({R.X.lower, R.Y.lower, R.Z.lower},
+                     {R.X.upper, R.Y.upper, R.Z.upper});
+
+    BRepSettings settings;
+    settings.min_feature = 1/res;
+    auto ms = Mesh::render(Tree(tree), region, settings);
+    return ms->saveSTL(f);
+}
+
+bool libfive_evaluator_save_mesh(libfive_evaluator evaluator, libfive_region3 R, const char *f)
+{
+    Region<3> region({R.X.lower, R.Y.lower, R.Z.lower},
+                     {R.X.upper, R.Y.upper, R.Z.upper});
+
+    BRepSettings settings; // TODO: pass it in as an argument
+    settings.workers = 1;  // NOTE: temporary limitation
+    auto ms = Mesh::render(evaluator, region, settings);
+    return ms->saveSTL(f);
+}
+
+bool libfive_tree_save_meshes(
+        libfive_tree trees[], libfive_region3 R,
+        float res, float quality, const char* f)
+{
+    Region<3> region({R.X.lower, R.Y.lower, R.Z.lower},
+                     {R.X.upper, R.Y.upper, R.Z.upper});
+
+    BRepSettings settings;
+    settings.min_feature = 1/res;
+    settings.max_err = pow(10, -quality);
+    std::list<const libfive::Mesh*> meshes;
+    for (unsigned i=0; trees[i] != nullptr; ++i){
+        auto ms = Mesh::render(Tree(trees[i]), region, settings);
+        meshes.push_back(ms.release());
+    }
+
+    const bool out = Mesh::saveSTL(f, meshes);
+    for (auto& m : meshes) {
+        delete m;
+    }
+    return out;
+}
+
+libfive_pixels* libfive_tree_render_pixels(libfive_tree tree, libfive_region2 R,
+                                 float z, float res)
+{
+    Voxels v({R.X.lower, R.Y.lower, z},
+             {R.X.upper, R.Y.upper, z}, res);
+    std::atomic_bool abort(false);
+    auto h = Heightmap::render(Tree(tree), v, abort);
+
+    libfive_pixels* out = new libfive_pixels;
+    out->width = h->depth.cols();
+    out->height = h->depth.rows();
+    out->pixels = new bool[out->width * out->height];
+
+    size_t i=0;
+    for (unsigned y=0; y < out->height; ++y)
+    {
+        for (unsigned x=0; x < out->width; ++x)
+        {
+            out->pixels[i++] = !std::isinf(h->depth(y, x));
+        }
+    }
+
+    return out;
+}
+
+libfive_evaluator libfive_tree_evaluator(libfive_tree tree, libfive_vars vars)
+{
+    std::map<libfive::Tree::Id, float> mapOfVars;
+    for (unsigned i = 0; i < vars.size; ++i)
+    {
+        auto treeId = static_cast<libfive::Tree::Id>(vars.vars[i]);
+        mapOfVars.insert(std::make_pair(treeId, vars.values[i]));
+    }
+    // TODO: For more than one worker
+    return new Evaluator(Tree(tree), mapOfVars);
+}
+
+bool libfive_evaluator_update_vars(libfive_evaluator eval_tree, libfive_vars vars)
+{
+    std::map<libfive::Tree::Id, float> mapOfVars;
+    for (unsigned i = 0; i < vars.size; ++i)
+    {
+        auto treeId = static_cast<libfive::Tree::Id>(vars.vars[i]);
+        mapOfVars.insert(std::make_pair(treeId, vars.values[i]));
+    }
+
+    return eval_tree->updateVars(mapOfVars);
+}
+
+void libfive_evaluator_delete(libfive_evaluator ptr)
+{
+    // TODO: For more than one worker
+    std::cout << "libfive_evaluator_delete";
+    delete ptr;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// These variables are autogenerated and compiled into the library
-// by the version.cmake script
-extern "C"
-{
-    extern const char* GIT_TAG;
-    extern const char* GIT_REV;
-    extern const char* GIT_BRANCH;
-}
-
+// These variables are injected into the compiler as definitions
 const char* libfive_git_version(void)
 {
     return GIT_TAG;

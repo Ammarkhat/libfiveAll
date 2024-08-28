@@ -13,13 +13,13 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #include "libfive/oracle/oracle_clause.hpp"
 #include "libfive/tree/tree.hpp"
 
-namespace Kernel {
+namespace libfive {
 
 // This oracle wraps the X, Y, or Z axis
 template <int A>
 class AxisOracle : public OracleStorage<>
 {
-    void evalInterval(Interval::I& out) override
+    void evalInterval(Interval& out) override
     {
         out = {lower(A), upper(A)};
     }
@@ -51,7 +51,7 @@ class AxisOracleClause : public OracleClause
 {
     std::unique_ptr<Oracle> getOracle() const override
     {
-        return std::unique_ptr<Oracle>(new AxisOracle<A>());
+        return std::make_unique<AxisOracle<A>>();
     }
 
     std::string name() const override
@@ -64,27 +64,27 @@ class AxisOracleClause : public OracleClause
 inline Tree convertToOracleAxes(Tree t)
 {
     return t.remap(
-        Tree(std::unique_ptr<OracleClause>(new AxisOracleClause<0>)),
-        Tree(std::unique_ptr<OracleClause>(new AxisOracleClause<1>)),
-        Tree(std::unique_ptr<OracleClause>(new AxisOracleClause<2>)));
+        Tree(std::make_unique<AxisOracleClause<0>>()),
+        Tree(std::make_unique<AxisOracleClause<1>>()),
+        Tree(std::make_unique<AxisOracleClause<2>>()));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 class CubeOracle : public OracleStorage<>
 {
-    void evalInterval(Interval::I& out) override
+    void evalInterval(Interval& out) override
     {
         using namespace boost::numeric; // for max
 
-        Interval::I X(lower.x(), upper.x());
-        Interval::I Y(lower.y(), upper.y());
-        Interval::I Z(lower.z(), upper.z());
+        Interval X(lower.x(), upper.x());
+        Interval Y(lower.y(), upper.y());
+        Interval Z(lower.z(), upper.z());
 
-        out = max(max(
-            max(-(X + 1.5f), X - 1.5f),
-            max(-(Y + 1.5f), Y - 1.5f)),
-            max(-(Z + 1.5f), Z - 1.5f));
+        out = Interval::max(Interval::max(
+            Interval::max(-(X + 1.5f), X - 1.5f),
+            Interval::max(-(Y + 1.5f), Y - 1.5f)),
+            Interval::max(-(Z + 1.5f), Z - 1.5f));
     }
 
     void evalPoint(float& out, size_t index) override
@@ -160,7 +160,7 @@ class CubeOracleClause : public OracleClause
 {
     std::unique_ptr<Oracle> getOracle() const override
     {
-        return std::unique_ptr<Oracle>(new CubeOracle());
+        return std::make_unique<CubeOracle>();
     }
 
     std::string name() const override
@@ -170,4 +170,4 @@ class CubeOracleClause : public OracleClause
 };
 
 
-}   // namespace Kernel
+}   // namespace libfive

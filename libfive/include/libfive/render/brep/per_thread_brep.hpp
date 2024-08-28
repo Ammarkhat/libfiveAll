@@ -13,7 +13,7 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #include <Eigen/Eigen>
 #include <Eigen/StdVector>
 
-namespace Kernel {
+namespace libfive {
 
 /*
  *  A PerThreadBRep is a thread-safe class used when to a BRep from multiple
@@ -25,7 +25,7 @@ template <unsigned N>
 class PerThreadBRep
 {
 public:
-    PerThreadBRep(std::atomic_uint32_t& c) : c(c)
+    PerThreadBRep(std::atomic<uint32_t>& c) : c(c)
     {
         assert(c.load() == 1);
     }
@@ -35,6 +35,10 @@ public:
         this->verts.push_back(v);
         indices.push_back(out);
         return out;
+    }
+    uint32_t pushVertex(const Eigen::Matrix<double, N, 1>& v) {
+        const Eigen::Matrix<float, N, 1> v_ = v.template cast<float>();
+        return pushVertex(v_);
     }
 
     /*  Adds a debug line to the mesh, drawing it as a zero-area
@@ -55,7 +59,7 @@ public:
     std::vector<uint32_t> indices;
 
 protected:
-    std::atomic_uint32_t& c;
+    std::atomic<uint32_t>& c;
 };
 
-}   // namespace Kernel
+}   // namespace libfive

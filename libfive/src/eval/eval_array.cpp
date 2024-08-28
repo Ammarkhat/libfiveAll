@@ -11,7 +11,7 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #include "libfive/eval/tape.hpp"
 #include "libfive/eval/deck.hpp"
 
-namespace Kernel {
+namespace libfive {
 
 constexpr size_t ArrayEvaluator::N;
 
@@ -21,8 +21,8 @@ ArrayEvaluator::ArrayEvaluator(const Tree& root)
     // Nothing to do here
 }
 
-ArrayEvaluator::ArrayEvaluator(
-        const Tree& root, const std::map<Tree::Id, float>& vars)
+ArrayEvaluator::ArrayEvaluator(const Tree& root,
+                               const std::map<Tree::Id, float>& vars)
     : ArrayEvaluator(std::make_shared<Deck>(root), vars)
 {
     // Nothing to do here
@@ -36,48 +36,54 @@ ArrayEvaluator::ArrayEvaluator(std::shared_ptr<Deck> d)
 
 ArrayEvaluator::ArrayEvaluator(
         std::shared_ptr<Deck> d, const std::map<Tree::Id, float>& vars)
-    : BaseEvaluator(d, vars), f(deck->num_clauses + 1, N)
+    : BaseEvaluator(d, vars), v(deck->num_clauses + 1, N), ambig(false)
 {
+    // Initialize the whole data array as zero, to prevent Valgrind warnings.
+    v.array() = 0;
+
     // Unpack variables into result array
-    for (auto& v : deck->vars.right)
+    for (auto& var_ : deck->vars.right)
     {
-        auto var = vars.find(v.first);
-        f.row(v.second) = (var != vars.end()) ? var->second : 0;
+        auto var = vars.find(var_.first);
+        v.row(var_.second) = (var != vars.end()) ? var->second : 0;
     }
 
     // Unpack constants into result array
     for (auto& c : deck->constants)
     {
-        f.row(c.first) = c.second;
+        v.row(c.first) = c.second;
     }
 }
 
-
-Eigen::Block<decltype(ArrayEvaluator::f), 1, Eigen::Dynamic>
-ArrayEvaluator::values(size_t _count)
-{
-    return values(_count, deck->tape);
+float ArrayEvaluator::value(const Eigen::Vector3f& pt) {
+    return value(pt, *deck->tape);
 }
 
-Eigen::Block<decltype(ArrayEvaluator::f), 1, Eigen::Dynamic>
-ArrayEvaluator::values(size_t count, Tape::Handle tape)
+float ArrayEvaluator::value(const Eigen::Vector3f& pt,
+                            const Tape& tape)
 {
-    setCount(count);
+    set(pt, 0);
+    return values(1, tape)(0);
+}
 
-    deck->bindOracles(tape);
-    auto index = tape->rwalk(*this);
-    deck->unbindOracles();
 
-    return f.block<1, Eigen::Dynamic>(index, 0, 1, count);
+Eigen::Block<decltype(ArrayEvaluator::v), 1, Eigen::Dynamic>
+ArrayEvaluator::values(size_t count)
+{
+    return values(count, *deck->tape);
 }
 
 void ArrayEvaluator::setCount(size_t count)
 {
+    count_actual = count;
+
 #if defined EIGEN_VECTORIZE_AVX512
     #define LIBFIVE_SIMD_SIZE 16
 #elif defined EIGEN_VECTORIZE_AVX
     #define LIBFIVE_SIMD_SIZE 8
 #elif defined EIGEN_VECTORIZE_SSE
+    #define LIBFIVE_SIMD_SIZE 4
+#elif defined EIGEN_VECTORIZE_NEON
     #define LIBFIVE_SIMD_SIZE 4
 #elif defined EIGEN_VECTORIZE
     #warning "EIGEN_VECTORIZE is set but no vectorization flag is found"
@@ -89,26 +95,89 @@ void ArrayEvaluator::setCount(size_t count)
     // If we have SIMD instructions, then round the evaluation size up
     // to the nearest block, to avoid issues where Eigen's SIMD and
     // non-SIMD paths produce different results.
-    if (LIBFIVE_SIMD_SIZE)
-    {
-        this->count = ((count + LIBFIVE_SIMD_SIZE - 1) / LIBFIVE_SIMD_SIZE)
+    if (LIBFIVE_SIMD_SIZE) {
+        count_simd = ((count + LIBFIVE_SIMD_SIZE - 1) / LIBFIVE_SIMD_SIZE)
                 * LIBFIVE_SIMD_SIZE;
+    } else {
+        count_simd = count;
     }
-    else
+}
+
+Eigen::Block<decltype(ArrayEvaluator::v), 1, Eigen::Dynamic>
+ArrayEvaluator::values(size_t count, const Tape& tape)
+{
+    setCount(count);
+
+    deck->bindOracles(tape);
+    for (auto itr = tape.rbegin(); itr != tape.rend(); ++itr) {
+        (*this)(itr->op, itr->id, itr->a, itr->b);
+    }
+    deck->unbindOracles();
+
+    return v.block<1, Eigen::Dynamic>(tape.root(), 0, 1, count);
+}
+
+
+std::pair<float, Tape::Handle> ArrayEvaluator::valueAndPush(
+        const Eigen::Vector3f& pt)
+{
+    return valueAndPush(pt, deck->tape);
+}
+
+std::pair<float, Tape::Handle> ArrayEvaluator::valueAndPush(
+        const Eigen::Vector3f& pt, const Tape::Handle& tape)
+{
+    auto out = value(pt, *tape);
+    auto p = tape->push(*deck,
+        [&](Opcode::Opcode op, Clause::Id /* id */,
+            Clause::Id a, Clause::Id b)
     {
-        this->count = count;
-    }
+        // For min and max operations, we may only need to keep one branch
+        // active if it is decisively above or below the other branch.
+        if (op == Opcode::OP_MAX)
+        {
+            if (v(a, 0) > v(b, 0))
+            {
+                return Tape::KEEP_A;
+            }
+            else if (v(b, 0) > v(a, 0))
+            {
+                return Tape::KEEP_B;
+            }
+            else
+            {
+                return Tape::KEEP_BOTH;
+            }
+        }
+        else if (op == Opcode::OP_MIN)
+        {
+            if (v(a, 0) > v(b, 0))
+            {
+                return Tape::KEEP_B;
+            }
+            else if (v(b, 0) > v(a, 0))
+            {
+                return Tape::KEEP_A;
+            }
+            else
+            {
+                return Tape::KEEP_BOTH;
+            }
+        }
+        return Tape::KEEP_ALWAYS;
+    }, Tape::SPECIALIZED);
+    return std::make_pair(out, std::move(p));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-bool ArrayEvaluator::setVar(Tree::Id var, float value)
+bool ArrayEvaluator::setVar(Tree::Id var_, float value)
 {
-    auto v = deck->vars.right.find(var);
-    if (v != deck->vars.right.end())
+    auto var = deck->vars.right.find(var_);
+    if (var != deck->vars.right.end())
     {
-        bool changed = f(v->second, 0) != value;
-        f.row(v->second) = value;
+        bool changed = v(var->second, 0) != value;
+        v.row(var->second) = value;
         return changed;
     }
     else
@@ -122,30 +191,27 @@ bool ArrayEvaluator::setVar(Tree::Id var, float value)
 Eigen::Block<decltype(ArrayEvaluator::ambig), 1, Eigen::Dynamic>
 ArrayEvaluator::getAmbiguous(size_t i)
 {
-    return getAmbiguous(i, deck->tape);
+    return getAmbiguous(i, *deck->tape);
 }
 
 Eigen::Block<decltype(ArrayEvaluator::ambig), 1, Eigen::Dynamic>
-ArrayEvaluator::getAmbiguous(size_t i, Tape::Handle tape)
+ArrayEvaluator::getAmbiguous(size_t i, const Tape& tape)
 {
     // Reset the ambiguous array to all false
     ambig = false;
 
-    bool abort = false;
-    tape->walk(
-        [&](Opcode::Opcode op, Clause::Id /* id */, Clause::Id a, Clause::Id b)
+    for (auto itr = tape.rbegin(); itr != tape.rend(); ++itr) {
+        if (itr->op == Opcode::ORACLE)
         {
-            if (op == Opcode::ORACLE)
-            {
-                deck->oracles[a]->checkAmbiguous(ambig.head(i));
-            }
-            else if (op == Opcode::OP_MIN || op == Opcode::OP_MAX)
-            {
-                ambig.head(i) = ambig.head(i) ||
-                    (f.block(a, 0, 1, i) ==
-                     f.block(b, 0, 1, i));
-            }
-        }, abort);
+            deck->oracles[itr->a]->checkAmbiguous(ambig.head(i));
+        }
+        else if (itr->op == Opcode::OP_MIN || itr->op == Opcode::OP_MAX)
+        {
+            ambig.head(i) = ambig.head(i) ||
+                (v.block(itr->a, 0, 1, i) ==
+                 v.block(itr->b, 0, 1, i));
+        }
+    };
 
     return ambig.head(i);
 }
@@ -155,9 +221,9 @@ ArrayEvaluator::getAmbiguous(size_t i, Tape::Handle tape)
 void ArrayEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
                                 Clause::Id a_, Clause::Id b_)
 {
-#define out f.block<1, Eigen::Dynamic>(id, 0, 1, count)
-#define a f.row(a_).head(count)
-#define b f.row(b_).head(count)
+#define out v.block<1, Eigen::Dynamic>(id, 0, 1, count_simd)
+#define a v.row(a_).head(count_simd)
+#define b v.row(b_).head(count_simd)
     switch (op)
     {
         case Opcode::OP_ADD:
@@ -181,7 +247,7 @@ void ArrayEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
         case Opcode::OP_ATAN2:
             for (auto i=0; i < a.size(); ++i)
             {
-                out(i) = atan2(a(i), b(i));
+                out(i) = atan2f(a(i), b(i));
             }
             break;
         case Opcode::OP_POW:
@@ -193,19 +259,38 @@ void ArrayEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
                 // Work around a limitation in pow by using boost's nth-root
                 // function on a single-point interval
                 if (a(i) < 0)
-                    out(i) = boost::numeric::nth_root(
-                            Interval::I(a(i), a(i)), b(i)).lower();
+                    out(i) = Interval::nth_root(
+                            Interval(a(i), a(i)),
+                            Interval(b(i), b(i))).lower();
                 else
-                    out(i) = pow(a(i), 1.0f/b(i));
+                    out(i) = powf(a(i), 1.0f/b(i));
             }
             break;
         case Opcode::OP_MOD:
+            // We choose to match Python's behavior:
+            //  If b is positive, then the result is in the range [ 0, b]
+            //  If b is negative, then the result is in the range [-b, 0]
+            //  If b is zero, then the result is NaN
             for (auto i=0; i < a.size(); ++i)
             {
-                out(i) = std::fmod(a(i), b(i));
-                while (out(i) < 0)
+                float d = fabs(a(i) / b(i));
+                if ((a(i) < 0) ^ (b(i) < 0)) {
+                    d = -ceil(d);
+                } else {
+                    d = floor(d);
+                }
+                out(i) = a(i) - b(i) * d;
+
+                // Clamping for safety
+                if ((b(i) > 0 && out(i) > b(i)) ||
+                    (b(i) < 0 && out(i) < b(i)))
                 {
-                    out(i) += b(i);
+                    out(i) = b(i);
+                }
+                if ((b(i) > 0.0f && out(i) < 0.0f) ||
+                    (b(i) < 0.0f && out(i) > 0.0f))
+                {
+                    out(i) = 0.0f;
                 }
             }
             break;
@@ -266,7 +351,8 @@ void ArrayEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
             break;
 
         case Opcode::ORACLE:
-            deck->oracles[a_]->evalArray(out);
+            deck->oracles[a_]->evalArray(
+                    v.block<1, Eigen::Dynamic>(id, 0, 1, count_actual));
             break;
 
         case Opcode::INVALID:
@@ -282,5 +368,5 @@ void ArrayEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
 #undef b
 }
 
-}   // namespace Kernel
+}   // namespace libfive
 

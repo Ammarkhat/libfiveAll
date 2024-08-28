@@ -17,15 +17,15 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #include "libfive/render/brep/indexes.hpp"
 #include "libfive/render/brep/per_thread_brep.hpp"
 
-namespace Kernel {
+namespace libfive {
 
 SimplexMesher::SimplexMesher(PerThreadBRep<3>& m, Tree t)
-    : m(m), eval(new XTreeEvaluator(t)), owned(true)
+    : m(m), eval(new Evaluator(t)), owned(true)
 {
     // Nothing to do here
 }
 
-SimplexMesher::SimplexMesher(PerThreadBRep<3>& m, XTreeEvaluator* es)
+SimplexMesher::SimplexMesher(PerThreadBRep<3>& m, Evaluator* es)
     : m(m), eval(es), owned(false)
 {
     // Nothing to do here
@@ -91,7 +91,7 @@ void SimplexMesher::load(const std::array<const SimplexTree<3>*, 4>& ts)
             sub->inside,
         });
     };
-    auto saveDummyVertex = [&subvs](Interval::I i) {
+    auto saveDummyVertex = [&subvs](Interval::State i) {
         subvs.push_back(SubspaceVertex {
                 Eigen::Vector3d::Zero(),
                 0,
@@ -436,9 +436,9 @@ void SimplexMesher::load(const std::array<const SimplexTree<3>*, 4>& ts)
 
 uint64_t SimplexMesher::searchEdge(Eigen::Vector3d inside,
                                    Eigen::Vector3d outside,
-                                   std::shared_ptr<Tape> tape)
+                                   const std::shared_ptr<Tape>& tape)
 {
-    // This code is based on xtree.cpp, but flattened to a signle pass
+    // This code is based on xtree.cpp, but flattened to a single pass
     assert(tape.get() != nullptr);
 
     // There's an interesting question of precision + speed tradeoffs,
@@ -459,10 +459,10 @@ uint64_t SimplexMesher::searchEdge(Eigen::Vector3d inside,
                 const double frac = j / (POINTS_PER_SEARCH - 1.0);
                 ps.col(j) = (inside * (1 - frac)) +
                             (outside * frac);
-                eval->array.set(ps.col(j).template cast<float>(), j);
+                eval->set(ps.col(j).template cast<float>(), j);
         }
 
-        auto out = eval->array.values(POINTS_PER_SEARCH, tape);
+        auto out = eval->values(POINTS_PER_SEARCH, *tape);
 
         // Skip one point, because the very first point is
         // already known to be inside the shape (but
@@ -475,7 +475,7 @@ uint64_t SimplexMesher::searchEdge(Eigen::Vector3d inside,
             // search, working around  numerical issues where different
             // evaluators disagree with whether points are inside or outside.
             if (out[j] > 0 || j == POINTS_PER_SEARCH - 1 ||
-                (out[j] == 0 && !eval->feature.isInside(
+                (out[j] == 0 && !eval->isInside(
                             ps.col(j).template cast<float>(), tape)))
 
             {
@@ -489,7 +489,7 @@ uint64_t SimplexMesher::searchEdge(Eigen::Vector3d inside,
     // TODO: we should weight the exact position based on values
     Eigen::Vector3d vert = (inside + outside) / 2;
 
-    return m.pushVertex(vert.template cast<float>());
+    return m.pushVertex(vert);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -501,4 +501,4 @@ template void SimplexMesher::load<Axis::Y>(
 template void SimplexMesher::load<Axis::Z>(
         const std::array<const SimplexTree<3>*, 4>&);
 
-}   // namespace Kernel
+}   // namespace libfive

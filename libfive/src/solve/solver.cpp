@@ -14,13 +14,13 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #include "libfive/eval/tape.hpp"
 #include "libfive/eval/eval_jacobian.hpp"
 
-namespace Kernel {
+namespace libfive {
 
 namespace Solver
 {
 
 static std::pair<float, Solution> findRoot(
-        JacobianEvaluator& e, Tape::Handle tape,
+        JacobianEvaluator& e, const Tape::Handle& tape,
         const Eigen::Vector3f pos, Solution vars, unsigned gas)
 {
     const float EPSILON = 1e-6f;
@@ -32,12 +32,12 @@ static std::pair<float, Solution> findRoot(
         ds.insert({v.first, 0});
     }
 
-    float r = e.eval(pos, tape);
+    float r = e.value(pos, *tape);
     bool converged = false;
     while (!converged && fabs(r) >= EPSILON && --gas)
     {
         // Evaluate and update our local gradient
-        for (auto& d : e.gradient(pos, tape))
+        for (auto& d : e.gradient(pos, *tape))
         {
             auto v = ds.find(d.first);
             if (v != ds.end())
@@ -58,7 +58,7 @@ static std::pair<float, Solution> findRoot(
         // Solve for step size using a backtracking line search
         const float slope = std::accumulate(ds.begin(), ds.end(), 0.0f,
                 [](float d, const decltype(ds)::value_type& itr) {
-                    return d + pow(itr.second, 2); });
+                    return d + powf(itr.second, 2.0f); });
 
         for (float step = r / slope; true; step /= 2)
         {
@@ -68,7 +68,7 @@ static std::pair<float, Solution> findRoot(
             }
 
             // Get new residual
-            const auto r_ = e.eval(pos, tape);
+            const float r_ = e.value(pos, *tape);
 
             // Find change in residuals
             const auto diff = r - r_;
@@ -106,7 +106,7 @@ std::pair<float, Solution> findRoot(
 }
 
 std::pair<float, Solution> findRoot(
-        JacobianEvaluator& e, Tape::Handle tape,
+        JacobianEvaluator& e, const Tape::Handle& tape,
         std::map<Tree::Id, float> vars, const Eigen::Vector3f pos,
         const Mask& mask, unsigned gas)
 {
@@ -127,4 +127,4 @@ std::pair<float, Solution> findRoot(
 
 } // namespace Solver
 
-}   // namespace Kernel
+}   // namespace libfive

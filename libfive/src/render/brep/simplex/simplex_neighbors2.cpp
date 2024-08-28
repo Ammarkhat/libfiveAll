@@ -7,11 +7,11 @@ This Source Code Form is subject to the terms of the Mozilla Public
 License, v. 2.0. If a copy of the MPL was not distributed with this file,
 You can obtain one at http://mozilla.org/MPL/2.0/.
 */
-#include "../neighbors.cpp"
-#include "simplex_neighbors.cpp"
+#include "../neighbors.inl"
+#include "simplex_neighbors.inl"
 
-namespace Kernel {
+namespace libfive {
 template class Neighbors<2, SimplexTree<2>, SimplexNeighbors<2>>;
 template class SimplexNeighbors<2>;
-}   // namespace Kernel
+}   // namespace libfive
 

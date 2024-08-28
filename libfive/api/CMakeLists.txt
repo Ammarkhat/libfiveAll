@@ -1,9 +1,20 @@
-set(LIBS five)
+set(LIBS libfive)
 
 set(SRCS libfive-api.cpp)
 
 add_executable(libfive-api ${SRCS})
 target_link_libraries(libfive-api ${LIBS})
+
+target_include_directories(libfive-api SYSTEM PUBLIC
+    ${Boost_INCLUDE_DIRS}
+    ${PNG_INCLUDE_DIR}
+    ${EIGEN_INCLUDE_DIRS}
+)
+
+target_include_directories(libfive-api PUBLIC
+    ../include
+)
+
 
 if (EMSCRIPTEN)
    set_target_properties(libfive-api PROPERTIES

@@ -16,12 +16,12 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #include "libfive/eval/tape.hpp"
 #include "libfive/tree/tree.hpp"
 
-namespace Kernel {
+namespace libfive {
 
 // Forward declarations
 template <unsigned N> class SimplexTree;
 template <unsigned N> class PerThreadBRep;
-class XTreeEvaluator;
+class Evaluator;
 class Mesh;
 
 class SimplexMesher
@@ -41,7 +41,7 @@ public:
      *  which is useful in cases where constructing evaluators
      *  is expensive and they should be re-used.
      */
-    SimplexMesher(PerThreadBRep<3>& m, XTreeEvaluator* es);
+    SimplexMesher(PerThreadBRep<3>& m, Evaluator* es);
 
     ~SimplexMesher();
 
@@ -64,13 +64,13 @@ protected:
      *  and returns its index.
      */
     uint64_t searchEdge(Eigen::Vector3d inside, Eigen::Vector3d outside,
-                        std::shared_ptr<Tape> tape);
+                        const std::shared_ptr<Tape>& tape);
 
     PerThreadBRep<3>& m;
-    XTreeEvaluator* eval;
+    Evaluator* eval;
     bool owned;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
 
-}   // namespace Kernel
+}   // namespace libfive

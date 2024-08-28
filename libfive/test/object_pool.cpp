@@ -10,18 +10,18 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #include "catch.hpp"
 
 #include "libfive/render/brep/object_pool.hpp"
+#include "libfive/render/brep/default_new_delete.hpp"
 
-using namespace Kernel;
+// Though the object pool is templated, it requires explicit instantiation
+// to save on compile time, so we pull in the source here.
+#include "../src/render/brep/object_pool.inl"
+
+using namespace libfive;
 
 struct Dummy {
     Dummy() { i = 1; }
     void reset() { i = 2; }
-    static void* operator new[](std::size_t sz) {
-        return ::operator new[](sz);
-    }
-    void operator delete[]( void* ptr ) {
-        ::operator delete[](ptr);
-    }
+    DEFAULT_OPERATORS_NEW_AND_DELETE
     int i;
 };
 
@@ -52,4 +52,19 @@ TEST_CASE("ObjectPool::put + get") {
     REQUIRE(b != nullptr);
     REQUIRE(b == a);
     REQUIRE(b->i == 2);
+}
+
+TEST_CASE("ObjectPool::size") {
+    ObjectPool<Dummy> pool;
+    auto a = pool.get();
+    REQUIRE(pool.size() == 1);
+
+    pool.put(a);
+    REQUIRE(pool.size() == 0);
+
+    pool.get();
+    REQUIRE(pool.size() == 1);
+
+    pool.get();
+    REQUIRE(pool.size() == 2);
 }

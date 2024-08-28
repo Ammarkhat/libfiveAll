@@ -11,7 +11,7 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #include "libfive/eval/deck.hpp"
 #include "libfive/eval/tape.hpp"
 
-namespace Kernel {
+namespace libfive {
 
 DerivArrayEvaluator::DerivArrayEvaluator(const Tree& root)
     : DerivArrayEvaluator(std::make_shared<Deck>(root))
@@ -19,8 +19,8 @@ DerivArrayEvaluator::DerivArrayEvaluator(const Tree& root)
     // Nothing to do here
 }
 
-DerivArrayEvaluator::DerivArrayEvaluator(
-        const Tree& root, const std::map<Tree::Id, float>& vars)
+DerivArrayEvaluator::DerivArrayEvaluator(const Tree& root,
+                                         const std::map<Tree::Id, float>& vars)
     : DerivArrayEvaluator(std::make_shared<Deck>(root), vars)
 {
     // Nothing to do here
@@ -34,7 +34,8 @@ DerivArrayEvaluator::DerivArrayEvaluator(std::shared_ptr<Deck> d)
 
 DerivArrayEvaluator::DerivArrayEvaluator(
         std::shared_ptr<Deck> deck, const std::map<Tree::Id, float>& vars)
-    : ArrayEvaluator(deck, vars), d(deck->num_clauses + 1, 1)
+    : BaseEvaluator(deck, vars), ArrayEvaluator(deck, vars),
+      d(deck->num_clauses + 1, 1)
 {
     // Initialize all derivatives to zero
     for (Eigen::Index i=0; i < d.rows(); ++i)
@@ -51,68 +52,81 @@ DerivArrayEvaluator::DerivArrayEvaluator(
 Eigen::Block<decltype(DerivArrayEvaluator::ambig), 1, Eigen::Dynamic>
 DerivArrayEvaluator::getAmbiguousDerivs(size_t i)
 {
-    return getAmbiguousDerivs(i, deck->tape);
+    return getAmbiguousDerivs(i, *deck->tape);
 }
 
 Eigen::Block<decltype(DerivArrayEvaluator::ambig), 1, Eigen::Dynamic>
-DerivArrayEvaluator::getAmbiguousDerivs(size_t i, Tape::Handle tape)
+DerivArrayEvaluator::getAmbiguousDerivs(size_t i, const Tape& tape)
 {
     // Reset the ambiguous array to all false
     ambig = false;
 
-    bool abort = false;
-    tape->walk(
-        [&](Opcode::Opcode op, Clause::Id /* id */, Clause::Id a, Clause::Id b)
+    for (auto itr = tape.rbegin(); itr != tape.rend(); ++itr) {
+        if (itr->op == Opcode::ORACLE)
         {
-            if (op == Opcode::ORACLE)
-            {
-                deck->oracles[a]->checkAmbiguous(ambig.head(i));
-            }
-            else if (op == Opcode::OP_MIN || op == Opcode::OP_MAX)
-            {
-                ambig.head(i) = ambig.head(i) ||
-                    ((f.block(a, 0, 1, i) ==
-                      f.block(b, 0, 1, i)) &&
-                      (d(a).leftCols(i) != d(b).leftCols(i)).colwise().sum());
-            }
-        }, abort);
+            deck->oracles[itr->a]->checkAmbiguous(ambig.head(i));
+        }
+        else if (itr->op == Opcode::OP_MIN || itr->op == Opcode::OP_MAX)
+        {
+            ambig.head(i) = ambig.head(i) ||
+                ((v.block(itr->a, 0, 1, i) ==
+                  v.block(itr->b, 0, 1, i)) &&
+                  (d(itr->a).leftCols(i) != d(itr->b).leftCols(i))
+                    .colwise().sum());
+        }
+    }
 
     return ambig.head(i);
 
 }
 
-Eigen::Block<decltype(DerivArrayEvaluator::out), 4, Eigen::Dynamic>
-DerivArrayEvaluator::derivs(size_t count)
+Eigen::Vector4f DerivArrayEvaluator::deriv(const Eigen::Vector3f& pt)
 {
-    return derivs(count, deck->tape);
+    return deriv(pt, *deck->tape);
+}
+
+Eigen::Vector4f DerivArrayEvaluator::deriv(const Eigen::Vector3f& pt,
+                                           const Tape& tape)
+{
+    set(pt, 0);
+    return derivs(1, tape).col(0);
 }
 
 Eigen::Block<decltype(DerivArrayEvaluator::out), 4, Eigen::Dynamic>
-DerivArrayEvaluator::derivs(size_t count, Tape::Handle tape)
+DerivArrayEvaluator::derivs(size_t count)
+{
+    return derivs(count, *deck->tape);
+}
+
+Eigen::Block<decltype(DerivArrayEvaluator::out), 4, Eigen::Dynamic>
+DerivArrayEvaluator::derivs(size_t count, const Tape& tape)
 {
     // Perform value evaluation, copying results into the 4th row of out
     out.row(3).head(count) = values(count, tape);
 
     // Perform derivative evaluation, copying results into the out array
     deck->bindOracles(tape);
-    out.topLeftCorner(3, count) = d(tape->rwalk(*this)).leftCols(count);
+    for (auto itr = tape.rbegin(); itr != tape.rend(); ++itr) {
+        (*this)(itr->op, itr->id, itr->a, itr->b);
+    }
     deck->unbindOracles();
 
     // Return a block of valid results from the out array
+    out.topLeftCorner(3, count) = d(tape.root()).leftCols(count);
     return out.block<4, Eigen::Dynamic>(0, 0, 4, count);
 }
 
 void DerivArrayEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
                                      Clause::Id a_, Clause::Id b_)
 {
-#define ov f.row(id).head(count)
-#define od d(id).leftCols(count)
+#define ov v.row(id).head(count_simd)
+#define od d(id).leftCols(count_simd)
 
-#define av f.row(a_).head(count)
-#define ad d(a_).leftCols(count)
+#define av v.row(a_).head(count_simd)
+#define ad d(a_).leftCols(count_simd)
 
-#define bv f.row(b_).head(count)
-#define bd d(b_).leftCols(count)
+#define bv v.row(b_).head(count_simd)
+#define bd d(b_).leftCols(count_simd)
 
     switch (op) {
         case Opcode::OP_ADD:
@@ -152,7 +166,7 @@ void DerivArrayEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
         case Opcode::OP_NTH_ROOT:
             for (Eigen::Index i=0; i < od.cols(); ++i)
                 od.col(i) = (ad.col(i) == 0)
-                    .select(0, ad.col(i) * (pow(av(i), 1.0f / bv(i) - 1) / bv(i)));
+                    .select(0, ad.col(i) * (powf(av(i), 1.0f / bv(i) - 1) / bv(i)));
             break;
         case Opcode::OP_MOD:
             od = ad;
@@ -172,7 +186,7 @@ void DerivArrayEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
         case Opcode::OP_SQRT:
             for (Eigen::Index i=0; i < od.rows(); ++i)
                 od.row(i) = (av < 0 || ad.row(i) == 0).select(
-                    Eigen::Array<float, 1, Eigen::Dynamic>::Zero(1, count),
+                    Eigen::Array<float, 1, Eigen::Dynamic>::Zero(1, count_simd),
                     ad.row(i) / (2 * ov));
             break;
         case Opcode::OP_NEG:
@@ -211,11 +225,15 @@ void DerivArrayEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
             break;
 
         case Opcode::CONST_VAR:
-            od = ad;
+            if (clear_vars) {
+                od = 0.0;
+            } else {
+                od = ad;
+            }
             break;
 
         case Opcode::ORACLE:
-            deck->oracles[a_]->evalDerivArray(od);
+            deck->oracles[a_]->evalDerivArray(d(id).leftCols(count_actual));
             break;
 
         case Opcode::INVALID:
@@ -237,4 +255,4 @@ void DerivArrayEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
 
 }
 
-}   // namespace Kernel
+}   // namespace libfive

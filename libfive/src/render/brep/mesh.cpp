@@ -11,102 +11,116 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 // #include <fstream>
 #include <boost/algorithm/string/predicate.hpp>
 
+#include "libfive/eval/evaluator.hpp"
+
 #include "libfive/render/brep/mesh.hpp"
-#include "libfive/render/brep/dc/dc_pool.hpp"
-#include "libfive/render/brep/dc/dc_mesher.hpp"
-#include "libfive/render/brep/simplex/simplex_pool.hpp"
-#include "libfive/render/brep/simplex/simplex_mesher.hpp"
 #include "libfive/render/brep/dual.hpp"
 #include "libfive/render/brep/region.hpp"
+#include "libfive/render/brep/settings.hpp"
 
-#if LIBFIVE_TRIANGLE_FAN_MESHING
-#include "libfive/render/brep/dc/intersection_aligner.hpp"
-#endif
+// Dual contouring
+#include "libfive/render/brep/dc/dc_worker_pool.hpp"
+#include "libfive/render/brep/dc/dc_mesher.hpp"
 
-namespace Kernel {
+// Simplex meshing
+#include "libfive/render/brep/simplex/simplex_worker_pool.hpp"
+#include "libfive/render/brep/simplex/simplex_mesher.hpp"
 
-const float Mesh::MAX_PROGRESS = 3.0f;
+// Hybrid meshing
+#include "libfive/render/brep/hybrid/hybrid_worker_pool.hpp"
+#include "libfive/render/brep/hybrid/hybrid_mesher.hpp"
 
-std::unique_ptr<Mesh> Mesh::render(const Tree t, const Region<3>& r,
-                                   double min_feature, double max_err,
-                                   bool multithread,
-                                   ProgressCallback progress_callback,
-                                   BRepAlgorithm alg)
+namespace libfive {
+
+std::unique_ptr<Mesh> Mesh::render(const Tree& t_, const Region<3>& r,
+                                   const BRepSettings& settings)
 {
-    std::atomic_bool cancel(false);
-    std::map<Tree::Id, float> vars;
-    return render(t, vars, r, min_feature, max_err,
-                  multithread ? 8 : 1, cancel, progress_callback, alg);
-}
-
-std::unique_ptr<Mesh> Mesh::render(
-            const Tree t, const std::map<Tree::Id, float>& vars,
-            const Region<3>& r, double min_feature, double max_err,
-            unsigned workers, std::atomic_bool& cancel,
-            ProgressCallback progress_callback,
-            BRepAlgorithm alg)
-{
-    std::vector<XTreeEvaluator, Eigen::aligned_allocator<XTreeEvaluator>> es;
-    es.reserve(workers);
-    for (unsigned i=0; i < workers; ++i)
-    {
-        es.emplace_back(XTreeEvaluator(t, vars));
+    std::vector<Evaluator, Eigen::aligned_allocator<Evaluator>> es;
+    es.reserve(settings.workers);
+    const auto t = t_.optimized();
+    for (unsigned i=0; i < settings.workers; ++i) {
+        es.emplace_back(Evaluator(t));
     }
 
-    return render(es.data(), r, min_feature, max_err, workers, cancel,
-                  progress_callback, alg);
+    return render(es.data(), r, settings);
 }
 
 std::unique_ptr<Mesh> Mesh::render(
-        XTreeEvaluator* es,
-        const Region<3>& r, double min_feature, double max_err,
-        int workers, std::atomic_bool& cancel,
-        ProgressCallback progress_callback,
-        BRepAlgorithm alg)
+        Evaluator* es,
+        const Region<3>& r, const BRepSettings& settings)
 {
     std::unique_ptr<Mesh> out;
-    if (alg == DUAL_CONTOURING)
+    if (settings.alg == DUAL_CONTOURING)
     {
-        auto t = DCPool<3>::build(
-                es, r, min_feature, max_err, workers,
-                cancel, progress_callback);
+        if (settings.progress_handler) {
+            // Pool::build, Dual::walk, t.reset
+            settings.progress_handler->start({1, 1, 1});
+        }
+        auto t = DCWorkerPool<3>::build(es, r, settings);
 
-        if (cancel.load() || t.get() == nullptr) {
+        if (settings.cancel.load() || t.get() == nullptr) {
+            if (settings.progress_handler) {
+                settings.progress_handler->finish();
+            }
             return nullptr;
         }
-
-#if LIBFIVE_TRIANGLE_FAN_MESHING
-        // Make sure each intersection has the same object in all cells.
-        Dual<3>::walk<IntersectionAligner>(t, 1, cancel, progress_callback);
-        workers = 1;    // The fan walker isn't thread-safe
-#endif
 
         // Perform marching squares
-        out = Dual<3>::walk<DCMesher>(t, workers, cancel, progress_callback);
+        out = Dual<3>::walk<DCMesher>(t, settings);
 
         // TODO: check for early return here again
-        t.reset(workers, progress_callback);
+        t.reset(settings);
     }
-    else if (alg == ISO_SIMPLEX)
+    else if (settings.alg == ISO_SIMPLEX)
     {
-        auto t = SimplexTreePool<3>::build(
-                es, r, min_feature, max_err, workers,
-                cancel, progress_callback);
+        if (settings.progress_handler) {
+            // Pool::build, Dual::walk, t->assignIndices, t.reset
+            settings.progress_handler->start({1, 1, 1});
+        }
+        auto t = SimplexWorkerPool<3>::build(es, r, settings);
 
-        if (cancel.load() || t.get() == nullptr) {
+        if (settings.cancel.load() || t.get() == nullptr) {
+            if (settings.progress_handler) {
+                settings.progress_handler->finish();
+            }
             return nullptr;
         }
 
-        t->assignIndices(workers, cancel);
+        t->assignIndices(settings);
 
-        out = Dual<3>::walk_<SimplexMesher>(t, workers,
-                cancel, progress_callback,
+        out = Dual<3>::walk_<SimplexMesher>(t, settings,
                 [&](PerThreadBRep<3>& brep, int i) {
                     return SimplexMesher(brep, &es[i]);
                 });
-        t.reset(workers, progress_callback);
+        t.reset(settings);
+    }
+    else if (settings.alg == HYBRID)
+    {
+        if (settings.progress_handler) {
+            // Pool::build, Dual::walk, t->assignIndices, t.reset
+            settings.progress_handler->start({1, 1, 1});
+        }
+        auto t = HybridWorkerPool<3>::build(es, r, settings);
+
+        if (settings.cancel.load() || t.get() == nullptr) {
+            if (settings.progress_handler) {
+                settings.progress_handler->finish();
+            }
+            return nullptr;
+        }
+
+        t->assignIndices(settings);
+
+        out = Dual<3>::walk_<HybridMesher>(t, settings,
+                [&](PerThreadBRep<3>& brep, int i) {
+                    return HybridMesher(brep, &es[i]);
+                });
+        t.reset(settings);
     }
 
+    if (settings.progress_handler) {
+        settings.progress_handler->finish();
+    }
     return out;
 }
 
@@ -184,4 +198,4 @@ void Mesh::line(const Eigen::Vector3f& a, const Eigen::Vector3f& b)
 //     return saveSTL(filename, {this});
 // }
 
-}   // namespace Kernel
+}   // namespace libfive

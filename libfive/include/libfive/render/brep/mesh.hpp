@@ -11,62 +11,48 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #include "libfive/tree/tree.hpp"
 
 #include "libfive/render/brep/brep.hpp"
-#include "libfive/render/brep/progress.hpp"
-#include "libfive/render/brep/algorithm.hpp"
 
-namespace Kernel {
-class XTreeEvaluator; // Forward declaration
+namespace libfive {
+
+// Forward declaration
+class Evaluator;
+struct BRepSettings;
+
 template <unsigned N> class Region;
 
 class Mesh : public BRep<3> {
 public:
     /*
-     *  Blocking, unstoppable render function
-     *  Returns nullptr if min_feature is invalid (i.e. <= 0)
-     */
-    static std::unique_ptr<Mesh> render(
-            const Tree t, const Region<3>& r,
-            double min_feature=0.1, double max_err=1e-8, bool multithread=true,
-            ProgressCallback progress_callback=EMPTY_PROGRESS_CALLBACK,
-            BRepAlgorithm=DUAL_CONTOURING);
-
-    /*
-     *  Fully-specified render function
+     *  Core render function
+     *
      *  Returns nullptr if min_feature is invalid or cancel is set to true
      *  partway through the computation.
      */
     static std::unique_ptr<Mesh> render(
-            const Tree t, const std::map<Tree::Id, float>& vars,
-            const Region<3>& r, double min_feature, double max_err,
-            unsigned workers, std::atomic_bool& cancel,
-            ProgressCallback progress_callback=EMPTY_PROGRESS_CALLBACK,
-            BRepAlgorithm=DUAL_CONTOURING);
+            const Tree& t, const Region<3>& r,
+            const BRepSettings& settings);
 
     /*
      *  Render function that re-uses evaluators
-     *  es must be a pointer to at least workers Evaluators
+     *  es must be a pointer to at least [settings.workers] Evaluators
+     *
      *  Returns nullptr if min_feature is invalid or cancel is set to true
      *  partway through the computation.
      */
     static std::unique_ptr<Mesh> render(
-            XTreeEvaluator* es, const Region<3>& r,
-            double min_feature, double max_err,
-            int workers, std::atomic_bool& cancel,
-            ProgressCallback progress_callback=EMPTY_PROGRESS_CALLBACK,
-            BRepAlgorithm=DUAL_CONTOURING);
+            Evaluator* es, const Region<3>& r,
+            const BRepSettings& settings);
 
     /*
      *  Writes the mesh to a file
      */
-    bool saveSTL(const std::string& filename);
+    bool saveSTL(const std::string& filename) const;
 
     /*
      *  Merge multiple bodies and write them to a single file
      */
     static bool saveSTL(const std::string& filename,
                         const std::list<const Mesh*>& meshes);
-
-    static const float MAX_PROGRESS;
 
 protected:
 
@@ -78,4 +64,4 @@ protected:
 
 };
 
-}   // namespace Kernel
+}   // namespace libfive

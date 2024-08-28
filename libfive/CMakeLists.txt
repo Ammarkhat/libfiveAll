@@ -4,5 +4,6 @@ if (NOT DEFINED LIBFIVE_BUILD_FROM_ROOT)
 endif()
 
 add_subdirectory(src)
+add_subdirectory(stdlib)
 add_subdirectory(api)
 

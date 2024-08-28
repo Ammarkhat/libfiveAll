@@ -13,8 +13,9 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 
 #include "libfive/oracle/oracle.hpp"
 #include "libfive/eval/eval_array_size.hpp"
+#include "libfive/render/brep/default_new_delete.hpp"
 
-namespace Kernel {
+namespace libfive {
 
 template <int N=LIBFIVE_EVAL_ARRAY_SIZE>
 class OracleStorage : public Oracle
@@ -31,7 +32,6 @@ public:
         lower = _lower;
         upper = _upper;
     }
-
 
     /*
      *  Inefficient-but-correct implementation of evalDerivs
@@ -54,7 +54,7 @@ public:
 
     /*  Make an aligned new operator, as this class has Eigen structs
      *  inside of it (which are aligned for SSE) */
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    ALIGNED_OPERATOR_NEW_AND_DELETE(OracleStorage)
 
 protected:
     /* Local storage for set(Vector3f) */
@@ -65,4 +65,4 @@ protected:
     Eigen::Vector3f upper;
 };
 
-}   // namespace Kernel
+}   // namespace libfive

@@ -12,7 +12,7 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 
 #include "libfive/eval/eval_array.hpp"
 
-namespace Kernel {
+namespace libfive {
 
 class DerivArrayEvaluator : public ArrayEvaluator
 {
@@ -31,13 +31,26 @@ protected:
     /*  out(col) is a result [dx, dy, dz, w] */
     Eigen::Array<float, 4, N> out;
 
+    /* When evaluating from a parent JacobianEvaluator, we want the
+     * CONST_VARS opcode to clear the derivatives, which is special-cased
+     * in this flag.  */
+    bool clear_vars = false;
+
 public:
     /*
      *  Multi-point evaluation (values must be stored with set)
      */
     Eigen::Block<decltype(out), 4, Eigen::Dynamic> derivs(size_t count);
     Eigen::Block<decltype(out), 4, Eigen::Dynamic> derivs(
-            size_t count, std::shared_ptr<Tape> tape);
+            size_t count, const Tape& tape);
+
+    /*
+     *  Single-point evaluation (return dx, dy, dz, distance)
+     *  Invalidates slot 0 in the data array.
+     */
+    Eigen::Vector4f deriv(const Eigen::Vector3f& pt);
+    Eigen::Vector4f deriv(const Eigen::Vector3f& pt,
+                          const Tape& tape);
 
     /*
      *  Per-clause evaluation, used in tape walking
@@ -56,17 +69,15 @@ public:
      *  This call performs O(i) work to set up the ambig array
      */
     Eigen::Block<decltype(ambig), 1, Eigen::Dynamic> getAmbiguousDerivs(
-            size_t count, std::shared_ptr<Tape> tape);
+            size_t count, const Tape& tape);
     Eigen::Block<decltype(ambig), 1, Eigen::Dynamic> getAmbiguousDerivs(
             size_t count);
 
     /*  Make an aligned new operator, as this class has Eigen structs
      *  inside of it (which are aligned for SSE) */
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-
-    friend class Tape; // for rwalk<DerivArrayEvaluator>
+    ALIGNED_OPERATOR_NEW_AND_DELETE(DerivArrayEvaluator)
 };
 
-}   // namespace Kernel
+}   // namespace libfive
 
 

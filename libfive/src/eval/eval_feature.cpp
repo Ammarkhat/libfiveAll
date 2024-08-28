@@ -11,7 +11,7 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #include "libfive/eval/deck.hpp"
 #include "libfive/eval/tape.hpp"
 
-namespace Kernel {
+namespace libfive {
 
 FeatureEvaluator::FeatureEvaluator(const Tree& root)
     : FeatureEvaluator(std::make_shared<Deck>(root))
@@ -27,23 +27,24 @@ FeatureEvaluator::FeatureEvaluator(std::shared_ptr<Deck> d)
 
 FeatureEvaluator::FeatureEvaluator(
         std::shared_ptr<Deck> t, const std::map<Tree::Id, float>& vars)
-    : PointEvaluator(t, vars), d(1, deck->num_clauses + 1)
+    : BaseEvaluator(t, vars), DerivArrayEvaluator(t, vars),
+      f(1, deck->num_clauses + 1), filled(1, deck->num_clauses + 1)
 {
     // Load the default derivatives
-    d(deck->X).push_back(Feature(Eigen::Vector3f(1, 0, 0)));
-    d(deck->Y).push_back(Feature(Eigen::Vector3f(0, 1, 0)));
-    d(deck->Z).push_back(Feature(Eigen::Vector3f(0, 0, 1)));
+    f(deck->X).push_back(Feature(Eigen::Vector3f(1, 0, 0)));
+    f(deck->Y).push_back(Feature(Eigen::Vector3f(0, 1, 0)));
+    f(deck->Z).push_back(Feature(Eigen::Vector3f(0, 0, 1)));
 
     // Set variables to have a single all-zero derivative
     for (auto& v : t->vars.right)
     {
-        d(v.second).push_back(Feature(Eigen::Vector3f::Zero()));
+        f(v.second).push_back(Feature(Eigen::Vector3f::Zero()));
     }
 
     // Set constants to have a single all-zero derivative
     for (auto& c : deck->constants)
     {
-        d(c.first).push_back(Feature(Eigen::Vector3f::Zero()));
+        f(c.first).push_back(Feature(Eigen::Vector3f::Zero()));
     }
 }
 
@@ -53,25 +54,43 @@ bool FeatureEvaluator::isInside(const Eigen::Vector3f& p)
 }
 
 bool FeatureEvaluator::isInside(const Eigen::Vector3f& p,
-                                Tape::Handle tape)
+                                const Tape::Handle& tape)
 {
-    auto handle = evalAndPush(p, tape);
+    auto handle = valueAndPush(p, tape);
 
     // Unambiguous cases
-    if (handle.first < 0)
-    {
+    if (handle.first < 0) {
+        if (handle.second != tape) {
+            deck->claim(std::move(handle.second));
+        }
         return true;
-    }
-    else if (handle.first > 0)
-    {
+    } else if (handle.first > 0) {
+        if (handle.second != tape) {
+            deck->claim(std::move(handle.second));
+        }
         return false;
     }
 
     // Otherwise, we need to handle the zero-crossing case!
 
+    // Mark that only the first slot is valid
+    filled = 1;
+
     // First, we evaluate and extract all of the features, saving
-    // time by re-using the shortened tape from evalAndPush
-    auto fs = d(handle.second->rwalk(*this));
+    // time by re-using the shortened tape from valueAndPush
+    for (auto itr = handle.second->rbegin();
+         itr != handle.second->rend();
+         ++itr)
+    {
+        (*this)(itr->op, itr->id, itr->a, itr->b);
+    }
+    auto fs = f(handle.second->root());
+
+    // If this is a freshly allocated tape, then release it to the Deck
+    // so that it can be reused later.
+    if (handle.second != tape) {
+        deck->claim(std::move(handle.second));
+    }
 
     // If there's only a single feature, we can get both positive and negative
     // values out if it's got a non-zero gradient
@@ -92,6 +111,7 @@ bool FeatureEvaluator::isInside(const Eigen::Vector3f& p,
         neg |= f.check(-f.deriv);
     }
     const bool outside = pos && !neg;
+
     return !outside;
 }
 
@@ -103,17 +123,28 @@ const boost::container::small_vector<Feature, 4>&
 
 const boost::container::small_vector<Feature, 4>&
     FeatureEvaluator::features_(const Eigen::Vector3f& p,
-                                Tape::Handle tape)
+                                const Tape::Handle& tape)
 {
     // Load the location into the results slot and evaluate point-wise
-    auto handle = evalAndPush(p, tape);
+    auto handle = valueAndPush(p, tape);
+    filled = 1;
 
     // Evaluate feature-wise
-    deck->bindOracles(handle.second);
-    auto index = handle.second->rwalk(*this);
+    deck->bindOracles(*handle.second);
+    for (auto itr = handle.second->rbegin(); itr != handle.second->rend(); ++itr) {
+        (*this)(itr->op, itr->id, itr->a, itr->b);
+    }
     deck->unbindOracles();
 
-    return d(index);
+    const auto root = handle.second->root();
+
+    // If this is a freshly allocated tape, then release it to the Deck
+    // so that it can be reused later.
+    if (handle.second != tape) {
+        deck->claim(std::move(handle.second));
+    }
+
+    return f(root);
 }
 
 std::list<Eigen::Vector3f> FeatureEvaluator::features(const Eigen::Vector3f& p)
@@ -123,7 +154,7 @@ std::list<Eigen::Vector3f> FeatureEvaluator::features(const Eigen::Vector3f& p)
 
 std::list<Eigen::Vector3f> FeatureEvaluator::features(
         const Eigen::Vector3f& p,
-        Tape::Handle tape)
+        const Tape::Handle& tape)
 {
     // Deduplicate and return the result
     std::list<Eigen::Vector3f> out;
@@ -140,237 +171,171 @@ std::list<Eigen::Vector3f> FeatureEvaluator::features(
 void FeatureEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
                                   Clause::Id a, Clause::Id b)
 {
-#define ov f(id)
-#define od d(id)
+#define of f(id)
 
-#define av f(a)
-#define _ads d(a)
+#define av v(a, 0)
+#define _ads f(a)
 #define ad _ad.deriv
 
-#define bv f(b)
-#define _bds d(b)
+#define bv v(b, 0)
+#define _bds f(b)
 #define bd _bd.deriv
-
 
 #define LOOP2 \
     for (auto& _ad : _ads) \
         for (auto& _bd : _bds)
 
-#define STORE2(expr) LOOP2 \
-    if (_ad.check(_bd)) \
-        od.push_back(Feature(expr, _ad, _bd));
+    of.clear();
 
-#define STORE1(expr) \
-    for (auto& _ad : _ads) \
-        od.push_back(Feature(expr, _ad));
-
-    od.clear();
-
-    switch (op) {
-        case Opcode::OP_ADD:
-            STORE2(ad + bd);
-            break;
-        case Opcode::OP_MUL:
-            // Product rule
-            STORE2(bd*av + ad*bv);
-            break;
-        case Opcode::OP_MIN:
-            if (av < bv || a == b)
-            {
-                od = _ads;
-            }
-            else if (av > bv)
-            {
-                od = _bds;
-            }
-            else LOOP2
-            {
-                Eigen::Vector3f epsilon = bd - ad;
-                if (epsilon.norm() == 0)
-                {
-                    if (_ad.hasEpsilons())
-                    {
-                        od.push_back(_ad);
-                    }
-                    if (_bd.hasEpsilons())
-                    {
-                        od.push_back(_bd);
-                    }
-                    if (!_ad.hasEpsilons() && !_bd.hasEpsilons())
-                    {
-                        od.push_back(_ad);
-                    }
+    if (op == Opcode::OP_MIN) {
+        if (av < bv || a == b) {
+            of = _ads;
+        } else if (av > bv) {
+            of = _bds;
+        }
+        else LOOP2 {
+            const Eigen::Vector3f epsilon = bd - ad;
+            if (epsilon.norm() == 0) {
+                if (_ad.hasEpsilons()) {
+                    of.push_back(_ad);
                 }
-                else
-                {
-                    // The new feature must be compatible with the epsilons
-                    // from both of the source features, plus the new epsilon
-                    // to select a particular branch of the max.
-                    auto combined = _ad;
-                    if (combined.push(_bd)) {
-                        auto fa = combined;
-                        fa.deriv = _ad.deriv;
-                        if (fa.push(epsilon)) {
-                            od.push_back(fa);
-                        }
+                if (_bd.hasEpsilons()) {
+                    of.push_back(_bd);
+                }
+                if (!_ad.hasEpsilons() && !_bd.hasEpsilons()) {
+                    of.push_back(_ad);
+                }
+            } else {
+                // The new feature must be compatible with the epsilons
+                // from both of the source features, plus the new epsilon
+                // to select a particular branch of the max.
+                auto combined = _ad;
+                if (combined.push(_bd)) {
+                    auto fa = combined;
+                    fa.deriv = _ad.deriv;
+                    if (fa.push(epsilon)) {
+                        of.push_back(fa);
+                    }
 
-                        auto fb = combined;
-                        fb.deriv = _bd.deriv;
-                        if (fb.push(-epsilon)) {
-                            od.push_back(fb);
-                        }
+                    auto fb = combined;
+                    fb.deriv = _bd.deriv;
+                    if (fb.push(-epsilon)) {
+                        of.push_back(fb);
                     }
                 }
             }
-            break;
-        case Opcode::OP_MAX:
-            if (av < bv || a == b)
-            {
-                od = _bds;
-            }
-            else if (av > bv)
-            {
-                od = _ads;
-            }
-            else LOOP2
-            {
-                Eigen::Vector3f epsilon = ad - bd;
-                if (epsilon.norm() == 0)
-                {
-                    if (_ad.hasEpsilons())
-                    {
-                        od.push_back(_ad);
-                    }
-                    if (_bd.hasEpsilons())
-                    {
-                        od.push_back(_bd);
-                    }
-                    if (!_ad.hasEpsilons() && !_bd.hasEpsilons())
-                    {
-                        od.push_back(_ad);
-                    }
+        }
+    } else if (op == Opcode::OP_MAX) {
+        if (av < bv || a == b) {
+            of = _bds;
+        } else if (av > bv) {
+            of = _ads;
+        } else LOOP2 {
+            const Eigen::Vector3f epsilon = ad - bd;
+            if (epsilon.norm() == 0) {
+                if (_ad.hasEpsilons()) {
+                    of.push_back(_ad);
                 }
-                else
-                {
-                    // The new feature must be compatible with the epsilons
-                    // from both of the source features, plus the new epsilon
-                    // to select a particular branch of the max.
-                    auto combined = _ad;
-                    if (combined.push(_bd)) {
-                        auto fa = combined;
-                        fa.deriv = _ad.deriv;
-                        if (fa.push(epsilon)) {
-                            od.push_back(fa);
-                        }
+                if (_bd.hasEpsilons()) {
+                    of.push_back(_bd);
+                }
+                if (!_ad.hasEpsilons() && !_bd.hasEpsilons()) {
+                    of.push_back(_ad);
+                }
+            } else {
+                // The new feature must be compatible with the epsilons
+                // from both of the source features, plus the new epsilon
+                // to select a particular branch of the max.
+                auto combined = _ad;
+                if (combined.push(_bd)) {
+                    auto fa = combined;
+                    fa.deriv = _ad.deriv;
+                    if (fa.push(epsilon)) {
+                        of.push_back(fa);
+                    }
 
-                        auto fb = combined;
-                        fb.deriv = _bd.deriv;
-                        if (fb.push(-epsilon)) {
-                            od.push_back(fb);
-                        }
+                    auto fb = combined;
+                    fb.deriv = _bd.deriv;
+                    if (fb.push(-epsilon)) {
+                        of.push_back(fb);
                     }
                 }
             }
-            break;
-        case Opcode::OP_SUB:
-            STORE2(ad - bd);
-            break;
-        case Opcode::OP_DIV:
-            STORE2((ad*bv - bd*av) / pow(bv, 2));
-            break;
-        case Opcode::OP_ATAN2:
-            STORE2((ad*bv - bd*av) / (pow(av, 2) + pow(bv, 2)));
-            break;
-        case Opcode::OP_POW:
-            // The full form of the derivative is
-            // od = m * (bv * ad + av * log(av) * bd))
-            // However, log(av) is often NaN and bd is always zero,
-            // (since it must be CONST), so we skip that part.
-            STORE2(ad * bv * pow(av, bv - 1));
-            break;
+        }
+    } else if (op == Opcode::ORACLE) {
+        deck->oracles[a]->evalFeatures(f(id));
+    } else if (Opcode::args(op) == 1) {
+        unsigned count = 0;
+        auto run = [&]() {
+            if (count) {
+                // Make sure that the values arrays are correctly filled up,
+                // because we'll be doing an array-wise evaluation, but
+                // previous only solved for the value in slot 0 (so filled(a)
+                // is 1 to start).
+                if (count > filled(a)) {
+                    v.row(a).leftCols(count)  = v(a, 0);
+                    filled(a) = count;
+                }
+                setCount(count);
+                DerivArrayEvaluator::operator()(op, id, a, b);
+                for (unsigned i=0; i < count; ++i) {
+                    of.push_back(Feature(d(id).col(i), _ads[i]));
+                }
+            }
+            count = 0;
+        };
 
-        case Opcode::OP_NTH_ROOT:
-            STORE2((ad.array() == 0)
-                    .select(0, ad * pow(av, 1.0f / bv - 1) / bv));
-            break;
-        case Opcode::OP_MOD:
-            od = _ads;
-            break;
-        case Opcode::OP_NANFILL:
-            od = std::isnan(av) ? _bds : _ads;
-            break;
-        case Opcode::OP_COMPARE:
-            od.push_back(Feature(Eigen::Vector3f::Zero()));
-            break;
+        for (auto& _ad : _ads) {
+            d(a).col(count++) = _ad.deriv;
+            if (count == N) {
+                run();
+            }
+        }
+        run();
+    } else if (Opcode::args(op) == 2) {
+        unsigned count = 0;
+        auto run = [&]() {
+            if (count) {
+                // Same logic as above
+                if (count > filled(a)) {
+                    v.row(a).leftCols(count)  = v(a, 0);
+                    filled(a) = count;
+                }
+                if (count > filled(b)) {
+                    v.row(b).leftCols(count)  = v(b, 0);
+                    filled(b) = count;
+                }
+                DerivArrayEvaluator::operator()(op, id, a, b);
+                for (unsigned i=0; i < count; ++i) {
+                    of.push_back(Feature(d(id).col(i), _ads[i / _bds.size()],
+                                                       _bds[i % _bds.size()]));
+                }
+            }
+            count = 0;
+        };
 
-        case Opcode::OP_SQUARE:
-            STORE1(ad * av * 2);
-            break;
-        case Opcode::OP_SQRT:
-            STORE1(av < 0 ? Eigen::Vector3f::Zero().eval()
-                          : (ad.array() == 0).select(Eigen::Vector3f::Zero(),
-                                                     (ad / (2 * ov))));
-            break;
-        case Opcode::OP_NEG:
-            STORE1(-ad);
-            break;
-        case Opcode::OP_SIN:
-            STORE1(ad * cos(av));
-            break;
-        case Opcode::OP_COS:
-            STORE1(ad * -sin(av));
-            break;
-        case Opcode::OP_TAN:
-            STORE1(ad * pow(1/cos(av), 2));
-            break;
-        case Opcode::OP_ASIN:
-            STORE1(ad / sqrt(1 - pow(av, 2)));
-            break;
-        case Opcode::OP_ACOS:
-            STORE1(ad / -sqrt(1 - pow(av, 2)));
-            break;
-        case Opcode::OP_ATAN:
-            STORE1(ad / (pow(av, 2) + 1));
-            break;
-        case Opcode::OP_LOG:
-            STORE1(ad / av);
-            break;
-        case Opcode::OP_EXP:
-            STORE1(ad * exp(av));
-            break;
-        case Opcode::OP_ABS:
-            STORE1(av > 0 ? ad : (-ad).eval());
-            break;
-        case Opcode::OP_RECIP:
-            STORE1(ad / -pow(av, 2));
-            break;
-
-        case Opcode::CONST_VAR:
-            od = _ads;
-            break;
-
-        case Opcode::ORACLE:
-            deck->oracles[a]->evalFeatures(od);
-            break;
-
-        case Opcode::INVALID:
-        case Opcode::CONSTANT:
-        case Opcode::VAR_X:
-        case Opcode::VAR_Y:
-        case Opcode::VAR_Z:
-        case Opcode::VAR_FREE:
-        case Opcode::LAST_OP: assert(false);
+        for (auto& _ad : _ads) {
+            for (auto& _bd : _bds) {
+                d(a).col(count) = _ad.deriv;
+                d(b).col(count) = _bd.deriv;
+                if (++count == N) {
+                    run();
+                }
+            }
+        }
+        run();
     }
+
     // Now to deduplicate.
-    if (od.size() > 1)
+    if (of.size() > 1)
     {
-        std::sort(od.begin(), od.end());
+        std::sort(of.begin(), of.end());
         // Now we walk through and remove any that are essentially the
         // same as the last one we kept.  This may occasionally miss 
         // near-duplicates despite sorting (e.g. 0,0,0 is followed by 1,0,0, 
         // followed by 0, 1e-8, 0), but that should be rare enough to not be
         // an issue.
-        auto newEnd = std::unique(od.begin(), od.end(),
+        auto newEnd = std::unique(of.begin(), of.end(),
                                   [](const Feature& f1, const Feature& f2)
         {
             // Not an equivalence relation, so behavior of std::unique is 
@@ -381,20 +346,19 @@ void FeatureEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
             return (derivDiff.dot(derivDiff) <= 1e-10 &&
                     f1.hasSameEpsilons(f2));
         });
-        od.erase(newEnd, od.end());
-        auto& firstDeriv = od.front().deriv;
-        if (std::all_of(od.begin(), od.end(), [&firstDeriv](const Feature& f)
+        of.erase(newEnd, of.end());
+        auto& firstDeriv = of.front().deriv;
+        if (std::all_of(of.begin(), of.end(), [&firstDeriv](const Feature& f)
         {
             auto derivDiff = f.deriv - firstDeriv;
             return derivDiff.dot(derivDiff) < 1e-10;
         }))
         {
             // Collapse into a single feature with no epsilons.
-            od = { firstDeriv };
+            of = { firstDeriv };
         }
     }
-#undef ov
-#undef od
+#undef of
 
 #undef av
 #undef _ads
@@ -404,8 +368,7 @@ void FeatureEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
 #undef _bds
 #undef bd
 
-#undef STORE1
-#undef STORE2
+#undef LOOP2
 }
 
-}   // namespace Kernel
+}   // namespace libfive

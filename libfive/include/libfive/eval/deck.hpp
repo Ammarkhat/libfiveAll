@@ -14,9 +14,7 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #include "libfive/eval/clause.hpp"
 #include "libfive/oracle/oracle.hpp"
 
-namespace Kernel {
-
-class Tape; /* Foward declaration */
+namespace libfive {
 
 /*
  *  A Deck is the top-level class that produces Tapes.  It includes
@@ -33,7 +31,7 @@ class Tape; /* Foward declaration */
 class Deck
 {
 public:
-    Deck(const Tree root);
+    Deck(const Tree& root);
 
     Deck(const Deck&)=delete;
     Deck& operator=(const Deck& other)=delete;
@@ -42,7 +40,7 @@ public:
     Clause::Id X, Y, Z;
 
     /*  Constants, unpacked from the tree at construction */
-    std::map<Clause::Id, float> constants;
+    std::vector<std::pair<Clause::Id, float>> constants;
 
     /*  Map of variables (in terms of where they live in this Evaluator) to
      *  their ids in their respective Tree (e.g. what you get when calling
@@ -64,12 +62,14 @@ public:
     std::shared_ptr<Tape> tape;
 
     /*  Moves this tape into the spares bin, so it can be reused later */
-    void claim(std::shared_ptr<Tape> tape) { spares.push_back(tape); }
+    void claim(std::shared_ptr<Tape>&& tape) {
+        spares.push_back(tape);
+    }
 
     /*
      *  Binds all oracles to the contexts in the given tape
      */
-    void bindOracles(std::shared_ptr<Tape> tape);
+    void bindOracles(const Tape& tape);
 
     /*
      *  Unbinds all oracles, setting their contexts to null
@@ -87,4 +87,4 @@ protected:
     friend class Tape;
 };
 
-} // namespace Kernel
+} // namespace libfive

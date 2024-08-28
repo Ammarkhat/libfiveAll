@@ -17,15 +17,15 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #include "libfive/render/brep/indexes.hpp"
 #include "libfive/render/brep/per_thread_brep.hpp"
 
-namespace Kernel {
+namespace libfive {
 
 SimplexDebugMesher::SimplexDebugMesher(PerThreadBRep<3>& m, Tree t)
-    : m(m), eval(new XTreeEvaluator(t)), owned(true)
+    : m(m), eval(new Evaluator(t)), owned(true)
 {
     // Nothing to do here
 }
 
-SimplexDebugMesher::SimplexDebugMesher(PerThreadBRep<3>& m, XTreeEvaluator* es)
+SimplexDebugMesher::SimplexDebugMesher(PerThreadBRep<3>& m, Evaluator* es)
     : m(m), eval(es), owned(false)
 {
     // Nothing to do here
@@ -92,7 +92,7 @@ void SimplexDebugMesher::load(const std::array<const SimplexTree<3>*, 4>& ts)
             sub->inside,
         });
     };
-    auto saveDummyVertex = [&subvs](Interval::I i) {
+    auto saveDummyVertex = [&subvs](Interval::State i) {
         subvs.push_back(SubspaceVertex {
                 Eigen::Vector3d::Zero(),
                 0,
@@ -291,5 +291,5 @@ template void SimplexDebugMesher::load<Axis::Y>(
 template void SimplexDebugMesher::load<Axis::Z>(
         const std::array<const SimplexTree<3>*, 4>&);
 
-}   // namespace Kernel
+}   // namespace libfive
 

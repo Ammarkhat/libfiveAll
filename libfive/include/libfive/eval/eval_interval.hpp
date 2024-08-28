@@ -14,10 +14,12 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #include "libfive/eval/interval.hpp"
 #include "libfive/eval/clause.hpp"
 
-namespace Kernel {
-class Tape; /* Forward declaration */
+namespace libfive {
+// Forward declarations
+class Tape;
+class Tree;
 
-class IntervalEvaluator : public BaseEvaluator
+class IntervalEvaluator : public virtual BaseEvaluator
 {
 public:
     IntervalEvaluator(const Tree& root);
@@ -30,29 +32,29 @@ public:
     /*
      *  Interval evaluation
      */
-    Interval::I eval(const Eigen::Vector3f& lower,
-                     const Eigen::Vector3f& upper);
-    Interval::I eval(const Eigen::Vector3f& lower,
-                     const Eigen::Vector3f& upper,
-                     std::shared_ptr<Tape> tape);
+    Interval eval(const Eigen::Vector3f& lower,
+                  const Eigen::Vector3f& upper);
+    Interval eval(const Eigen::Vector3f& lower,
+                  const Eigen::Vector3f& upper,
+                  const std::shared_ptr<Tape>& tape);
 
-    std::pair<Interval::I, std::shared_ptr<Tape>> evalAndPush(
-                     const Eigen::Vector3f& lower,
-                     const Eigen::Vector3f& upper);
-    std::pair<Interval::I, std::shared_ptr<Tape>> evalAndPush(
-                     const Eigen::Vector3f& lower,
-                     const Eigen::Vector3f& upper,
-                     std::shared_ptr<Tape> tape);
+    std::pair<Interval, std::shared_ptr<Tape>> intervalAndPush(
+            const Eigen::Vector3f& lower,
+            const Eigen::Vector3f& upper);
+    std::pair<Interval, std::shared_ptr<Tape>> intervalAndPush(
+            const Eigen::Vector3f& lower,
+            const Eigen::Vector3f& upper,
+            const std::shared_ptr<Tape>& tape);
 
     /*
      *  Returns a shortened tape based on the most recent evaluation.
      *
-     *  Normally, this is invoked through evalAndPush, but in some cases,
+     *  Normally, this is invoked through intervalAndPush, but in some cases,
      *  we need to call it as a standalone function.  If you're not using
      *  Oracles, then you probably don't need to call it.
      */
     std::shared_ptr<Tape> push(/* uses top-level tape */);
-    std::shared_ptr<Tape> push(std::shared_ptr<Tape> tape);
+    std::shared_ptr<Tape> push(const std::shared_ptr<Tape>& tape);
 
     /*
      *  Changes a variable's value
@@ -62,26 +64,18 @@ public:
      */
     bool setVar(Tree::Id var, float value);
 
-    bool isSafe() const { return safe; }
-
 protected:
-    /*  i[clause].first is the interval result for that clause,
-     *  i[clause].second indicates whether the result might be NaN (which is
-     *  generally not included in interval evaluation) */
-    std::vector<std::pair<Interval::I, bool>> i;
+    /*  i[clause] is the interval result for that clause, */
+    std::vector<Interval> i;
 
-    /*  Marks whether the most recent evaluation could have any NaN in its
-     *  root clause.
-     */
-     bool safe;
+     /* Sets i[index] = f and maybe_nan[index] = std::isnan(f) */
+     void store(float f, size_t index);
 
     /*
      *  Per-clause evaluation, used in tape walking
      */
     void operator()(Opcode::Opcode op, Clause::Id id,
                     Clause::Id a, Clause::Id b);
-
-    friend class Tape; // for rwalk<IntervalEvaluator>
 };
 
-}   // namespace Kernel
+}   // namespace libfive

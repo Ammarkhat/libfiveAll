@@ -10,11 +10,11 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #include "catch.hpp"
 
 #include "libfive/render/brep/simplex/qef.hpp"
-#include "libfive/eval/eval_deriv.hpp"
+#include "libfive/eval/eval_deriv_array.hpp"
 
 #include "util/shapes.hpp"
 
-using namespace Kernel;
+using namespace libfive;
 
 TEST_CASE("QEF::solve")
 {
@@ -173,7 +173,7 @@ template <unsigned N>
 QEF<N> fromCorners(Region<N> r, Tree c)
 {
     QEF<2> q;
-    DerivEvaluator d(c);
+    DerivArrayEvaluator d(c);
 
     for (unsigned i=0; i < 4; ++i) {
         const auto pos = r.corner(i);
@@ -230,6 +230,8 @@ TEST_CASE("QEF::solveBounded")
             CAPTURE(sol.error);
             REQUIRE(sol.error > 0);
             REQUIRE(sol.position.x() == Approx(1.5));
+            REQUIRE(sol.constrained[0] == false);
+            REQUIRE(sol.constrained[1] == true);
 
         }
         {
@@ -240,12 +242,33 @@ TEST_CASE("QEF::solveBounded")
             CAPTURE(sol.value);
             CAPTURE(sol.rank);
             CAPTURE(sol.error);
-            REQUIRE(sol.error > 0);
+            REQUIRE(sol.error >= 0);
             REQUIRE(sol.position.x() == Approx(1.5));
             REQUIRE(sol.position.y() == Approx(2.7));
             REQUIRE(sol.rank == 2);
             REQUIRE(sol.error == Approx(0.0).margin(1e-9));
             REQUIRE(sol.value == Approx(-1));
+            REQUIRE(sol.constrained[0] == false);
+            REQUIRE(sol.constrained[1] == false);
         }
     }
+}
+
+TEST_CASE("QEF::minimizeErrorAt")
+{
+    auto c = circle(1, Eigen::Vector2f(1.5, 2.7));
+    Region<2> r({1, 2}, {2, 3});
+    QEF<2> q = fromCorners(r, c);
+
+    // It doesn't matter what this value is; we're just going to
+    // confirm that the value is correctly minimizing the error
+    // by trying to offset it a little bit.
+    Eigen::Vector2d v(1.3, 1.7);
+    auto sol = q.minimizeErrorAt(v);
+
+    CAPTURE(sol.value);
+    CAPTURE(sol.error);
+    REQUIRE(sol.error == Approx(q.error(v, sol.value)));
+    REQUIRE(q.error(v, sol.value + 0.01) > sol.error);
+    REQUIRE(q.error(v, sol.value - 0.01) > sol.error);
 }
