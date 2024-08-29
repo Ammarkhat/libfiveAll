@@ -308,13 +308,13 @@ void libfive_free_str(char* ptr);
 
 ////////////////////////////////////////////////////////////////////////////////
 
-struct libfive_args;
-void libfive_set_arg_name(libfive_args* a, uint32_t i, const char* name);
-void libfive_args_delete(libfive_args* a);
-libfive_args* libfive_args_new(uint32_t count);
-const char* libfive_arg_name(libfive_args* a, uint32_t i);
-void libfive_set_arg_name(libfive_args* a, uint32_t i, const char* name);
-void libfive_set_arg_id(libfive_args* a, uint32_t i, libfive_id id);
+// struct libfive_args;
+// void libfive_set_arg_name(libfive_args* a, uint32_t i, const char* name);
+// void libfive_args_delete(libfive_args* a);
+// libfive_args* libfive_args_new(uint32_t count);
+// const char* libfive_arg_name(libfive_args* a, uint32_t i);
+// void libfive_set_arg_name(libfive_args* a, uint32_t i, const char* name);
+// void libfive_set_arg_id(libfive_args* a, uint32_t i, libfive_id id);
 
 
 // ////////////////////////////////////////////////////////////////////////////////

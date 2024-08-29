@@ -85,7 +85,7 @@ if (EMSCRIPTEN)
     # `-s` seems more like a compiler flag.
 
     # Ensure WebAssembly is generated rather than asm.js.
-    link_libraries("-s WASM=1")
+    # link_libraries("-s WASM=1")
 
     # Improves debug-ability of exceptions.
     #link_libraries("-s ASSERTIONS=1")
@@ -156,7 +156,7 @@ endif()
 
 ################################################################################
 
-set(CMAKE_CXX_FLAGS "-DEMSCRIPTEN_HAS_UNBOUND_TYPE_NAMES=0 -fno-exceptions -Wall -Wextra -fPIC -pedantic -Werror=switch")
+set(CMAKE_CXX_FLAGS "-fno-exceptions -Wall -Wextra -fPIC -pedantic -Werror=switch")
 
 if (LIBFIVE_WITH_MARCH_NATIVE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
@@ -202,7 +202,7 @@ if (BUILD_STUDIO_APP)
     endif()
 endif()
 
-#find_package(Boost REQUIRED)
+find_package(Boost REQUIRED)
 
 if (LIBFIVE_FIND_PKG_PNG)
    find_package(PNG REQUIRED)

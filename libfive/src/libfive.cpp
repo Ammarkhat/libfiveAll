@@ -194,10 +194,10 @@ libfive_vec3 libfive_tree_eval_d(libfive_tree t, libfive_vec3 p)
     return {v.x(), v.y(), v.z()};
 }
 
-bool libfive_tree_eq(libfive_tree a, libfive_tree b)
-{
-    return *a == *b;
-}
+// bool libfive_tree_eq(libfive_tree a, libfive_tree b)
+// {
+//     return *a == *b;
+// }
 
 // char* libfive_tree_print(libfive_tree t)
 // {
@@ -389,30 +389,30 @@ bool libfive_tree_save_meshes(
     return out;
 }
 
-libfive_pixels* libfive_tree_render_pixels(libfive_tree tree, libfive_region2 R,
-                                 float z, float res)
-{
-    Voxels v({R.X.lower, R.Y.lower, z},
-             {R.X.upper, R.Y.upper, z}, res);
-    std::atomic_bool abort(false);
-    auto h = Heightmap::render(Tree(tree), v, abort);
+// libfive_pixels* libfive_tree_render_pixels(libfive_tree tree, libfive_region2 R,
+//                                  float z, float res)
+// {
+//     Voxels v({R.X.lower, R.Y.lower, z},
+//              {R.X.upper, R.Y.upper, z}, res);
+//     std::atomic_bool abort(false);
+//     auto h = Heightmap::render(Tree(tree), v, abort);
 
-    libfive_pixels* out = new libfive_pixels;
-    out->width = h->depth.cols();
-    out->height = h->depth.rows();
-    out->pixels = new bool[out->width * out->height];
+//     libfive_pixels* out = new libfive_pixels;
+//     out->width = h->depth.cols();
+//     out->height = h->depth.rows();
+//     out->pixels = new bool[out->width * out->height];
 
-    size_t i=0;
-    for (unsigned y=0; y < out->height; ++y)
-    {
-        for (unsigned x=0; x < out->width; ++x)
-        {
-            out->pixels[i++] = !std::isinf(h->depth(y, x));
-        }
-    }
+//     size_t i=0;
+//     for (unsigned y=0; y < out->height; ++y)
+//     {
+//         for (unsigned x=0; x < out->width; ++x)
+//         {
+//             out->pixels[i++] = !std::isinf(h->depth(y, x));
+//         }
+//     }
 
-    return out;
-}
+//     return out;
+// }
 
 libfive_evaluator libfive_tree_evaluator(libfive_tree tree, libfive_vars vars)
 {

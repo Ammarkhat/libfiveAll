@@ -335,7 +335,7 @@ std::ostream& Tree::print_prefix(std::ostream& s) const {
                 todo.push(' ');
                 todo.push(t->t.get());
             } else {
-                throw TreeData::InvalidException();
+                // throw TreeData::InvalidException();
             }
         }
     }
@@ -393,7 +393,7 @@ Tree Tree::remap(Tree X, Tree Y, Tree Z) const {
 
 Tree Tree::apply(Tree var, Tree value) const {
     if (var->op() != Opcode::VAR_FREE) {
-        throw TreeData::ApplyException();
+        // throw TreeData::ApplyException();
     }
     return Tree(new Data(TreeApply { var, value, *this }));
 }

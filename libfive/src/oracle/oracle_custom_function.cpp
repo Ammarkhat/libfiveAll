@@ -1,14 +1,14 @@
 #include "libfive/oracle/oracle_custom_function.hpp"
 #include <iostream>
 
-using namespace Kernel;
+using namespace libfive;
 
 CustomFunctionOracle::CustomFunctionOracle(CustomFunctionWrapper* cfw)
     : cfw(cfw)
 {
 }
 
-void CustomFunctionOracle::evalInterval(Interval::I& out)
+void CustomFunctionOracle::evalInterval(Interval& out)
 {
     // out = Interval(0.0f, 1.0f);
     // out = {-10000.0, 10000.0};

@@ -255,5 +255,5 @@ bool TransformedOracle::Context::isTerminal()
            (!u || u->isTerminal());
 }
 
-} //Namespace Kernel
+} //namespace libfive
 

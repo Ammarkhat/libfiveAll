@@ -13,7 +13,7 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 #include <functional>
 #include <unordered_map>
 #include <utility>
-#include <variant>
+// #include <variant>
 #include <vector>
 
 #include "libfive/tree/opcode.hpp"

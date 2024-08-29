@@ -9,6 +9,7 @@
 // #include "libfive/solve/bounds.hpp"
 #include "libfive/render/brep/mesh.hpp"
 #include "libfive/render/brep/region.hpp"
+#include "libfive/render/brep/settings.hpp"
 
 #include "libfive/oracle/custom_function.hpp"
 #include "libfive/oracle/oracle_custom_function.hpp"
@@ -1011,8 +1012,13 @@ MeshDto meshImplicitFunction(std::string implicitString, float resolution, float
     // using std::chrono::milliseconds;
 
     // auto t1 = high_resolution_clock::now();
+
+    libfive::BRepSettings settings;
+    settings.min_feature =  1.0/resolution;
+    settings.max_err = maxError;
+    settings.workers = 1;
     
-    auto mesh = Kernel::Mesh::render(out, bds, 1.0/resolution, maxError, false); 
+    auto mesh = libfive::Mesh::render(out, bds, settings); 
   
     // auto t2 = high_resolution_clock::now();
     /* Getting number of milliseconds as an integer. */

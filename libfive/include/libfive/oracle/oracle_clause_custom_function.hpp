@@ -5,7 +5,7 @@
 #include "libfive/oracle/oracle_clause.hpp"
 #include "./oracle_custom_function.hpp"
 
-namespace Kernel {
+namespace libfive {
 
 class CustomFunctionOracleClause : public OracleClause
 {

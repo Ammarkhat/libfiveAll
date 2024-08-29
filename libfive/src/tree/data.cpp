@@ -41,7 +41,7 @@ const Tree& TreeData::lhs() const {
     } else if (auto i = std::get_if<TreeBinaryOp>(this)) {
         return i->lhs;
     } else {
-        throw ChildException();
+        // throw ChildException();
     }
 }
 
@@ -49,7 +49,7 @@ const Tree& TreeData::rhs() const {
     if (auto i = std::get_if<TreeBinaryOp>(this)) {
         return i->rhs;
     } else {
-        throw ChildException();
+        // throw ChildException();
     }
 }
 
@@ -59,7 +59,7 @@ float TreeData::value() const {
     if (auto i = std::get_if<TreeConstant>(this)) {
         return i->value;
     } else {
-        throw ValueException();
+        // throw ValueException();
     }
 }
 
@@ -67,7 +67,7 @@ std::unique_ptr<Oracle> TreeData::build_oracle() const {
     if (auto i = std::get_if<TreeOracle>(this)) {
         return i->oracle->getOracle();
     } else {
-        throw OracleException();
+        // throw OracleException();
     }
 }
 
@@ -75,7 +75,7 @@ const OracleClause& TreeData::oracle_clause() const {
     if (auto i = std::get_if<TreeOracle>(this)) {
         return *(i->oracle);
     } else {
-        throw OracleException();
+        // throw OracleException();
     }
 }
 

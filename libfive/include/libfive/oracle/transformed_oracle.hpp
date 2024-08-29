@@ -77,5 +77,5 @@ private:
 
 
 
-} //Namespace Kernel
+} //namespace libfive
 

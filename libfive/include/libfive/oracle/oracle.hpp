@@ -157,5 +157,5 @@ protected:
     std::shared_ptr<OracleContext> context;
 };
 
-} //Namespace Kernel
+} //namespace libfive
 

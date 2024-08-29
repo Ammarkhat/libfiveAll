@@ -2,9 +2,9 @@
 
 #include "libfive/oracle/oracle_storage.hpp"
 
-using namespace Kernel;
+using namespace libfive;
 
-namespace Kernel {
+namespace libfive {
 
 class CustomFunctionWrapper{
     public:
@@ -17,7 +17,7 @@ class CustomFunctionOracle : public OracleStorage<>
 public:
     CustomFunctionOracle(CustomFunctionWrapper* cfw);
 
-    void evalInterval(Interval::I &out) override;
+    void evalInterval(Interval &out) override;
     void evalPoint(float& out, size_t index=0) override;
 
     void checkAmbiguous(
