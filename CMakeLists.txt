@@ -156,7 +156,7 @@ endif()
 
 ################################################################################
 
-set(CMAKE_CXX_FLAGS "-fno-exceptions -Wall -Wextra -fPIC -pedantic -Werror=switch")
+set(CMAKE_CXX_FLAGS "-fno-exceptions -Wall -Wextra -fPIC -pedantic -Werror=switch -pthread")
 
 if (LIBFIVE_WITH_MARCH_NATIVE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
