@@ -59,6 +59,16 @@ Tree inverse(Tree a) {
 Tree difference(Tree a, Tree b) {
     return intersection(a, inverse(b));
 }
+
+Tree smoothUnion(Tree fA, Tree fB) {
+  	return (1.0 / 1.5) * (fA + fB - sqrt(fA*fA + fB*fB - fA*fB));
+}
+Tree smoothIntersection(Tree fA, Tree fB) {
+    return (1.0 / 1.5) * (fA + fB + sqrt(fA*fA + fB*fB - fA*fB));
+}
+Tree smoothDifference(Tree a, Tree b) {
+    return smoothIntersection(a, inverse(b));
+}
 Tree offset(Tree a, float off) {
     return a - off;
 }
@@ -353,14 +363,14 @@ int parseNode(Node* parentNode, vector<string> words, int i){
     int nextPosition = i;
     Node node;
     string word = words[i];
-    if(word == "union" || word == "intersection" || word == "difference" || word == "blend" || word == "spheres" || word == "revolveCircles"){
+    if(word == "union" || word == "intersection" || word == "difference" || word == "blend" || word == "spheres" || word == "revolveCircles" || word  == "smoothunion" || word  == "smoothintersection" || word  == "smoothdifference"){
         node.type = word;
         nextPosition = parseNode(&node, words, i+2);
         parentNode->children.push_back(node);
         if(nextPosition < words.size()-1){
             nextPosition = parseNode(parentNode, words, nextPosition);
         }
-    }else if(word == "offset"){
+    }else if(word == "offset" ){
         node.type = "offset";
         node.data.push_back(stod(words[i+2]));
         nextPosition = parseNode(&node, words, i+3);
@@ -731,6 +741,13 @@ Tree buildTree(Node& root) {
         tr = _union(tr, buildTree(child));
       }
       return tr;
+    }else if(root.type == "smoothunion"){
+      Tree tr = buildTree(root.children[0]);
+      for(size_t i = 1; i< root.children.size(); i++){
+        auto child = root.children[i];
+        tr = smoothUnion(tr, buildTree(child));
+      }
+      return tr;
     } else if(root.type == "blend"){
       Tree tr = buildTree(root.children[0]);
       for(size_t i = 1; i< root.children.size(); i++){
@@ -745,11 +762,25 @@ Tree buildTree(Node& root) {
         tr = difference(tr, buildTree(child));
       }
       return tr;
+    } else if(root.type == "smoothdifference"){
+      Tree tr = buildTree(root.children[0]);
+      for(size_t i = 1; i< root.children.size(); i++){
+        auto child = root.children[i];
+        tr = smoothDifference(tr, buildTree(child));
+      }
+      return tr;
     } else if(root.type == "intersection"){
       Tree tr = buildTree(root.children[0]);
       for(size_t i = 1; i< root.children.size(); i++){
         auto child = root.children[i];
         tr = intersection(tr, buildTree(child));
+      }
+      return tr;
+    } else if(root.type == "smoothintersection"){
+      Tree tr = buildTree(root.children[0]);
+      for(size_t i = 1; i< root.children.size(); i++){
+        auto child = root.children[i];
+        tr = smoothIntersection(tr, buildTree(child));
       }
       return tr;
     } else if(root.type == "offset"){

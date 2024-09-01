@@ -27,12 +27,14 @@ Building:
        sudo emcmake cmake .. -DCMAKE_PREFIX_PATH=$(brew --prefix)
        sudo emmake make
 
-* if you encounter an error: "Please specify rounding control mechanism.", a simple workaround is to comment out that line.
-
 * if it can't find boost or eigen copy them (the include folder) from brew location (/opt/homebrew/Cellar) to emsdk cache (/Users/ammarhattab/Desktop/Development/emsdk/upstream/emscripten/cache/sysroot/include)
+
+* if you encounter an error: "Please specify rounding control mechanism.", a simple workaround is to comment out that line.
 
 * for some reason -lembind doesn't work on some platforms and I have to replace it with --bind
  
+* if for some reason, you are faced with python problems, uninstall python from brew, and install it through google.
+
 * rename the output libfive.api.mjs to libfive.api.js
 
 * Usage: 
