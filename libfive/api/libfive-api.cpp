@@ -47,6 +47,22 @@ typedef Tree TreeFloat;
                              const auto y = Tree::Y(); (void)y; \
                              const auto z = Tree::Z(); (void)z; ;
 
+
+TreeVec3 operator+(const TreeVec3& a, const TreeVec3& b) {
+    return TreeVec3{a.x + b.x, a.y + b.y, a.z + b.z};
+}
+TreeVec3 operator-(const TreeVec3& a, const TreeVec3& b) {
+    return TreeVec3{a.x - b.x, a.y - b.y, a.z - b.z};
+}
+TreeVec3 operator-(const TreeVec3& a) {
+    return TreeVec3{-a.x, -a.y, -a.z};
+}
+TreeVec3 operator*(const TreeVec3& a, const TreeFloat& b) {
+    return TreeVec3{a.x * b, a.y * b, a.z * b};
+}
+TreeVec3 operator/(const TreeVec3& a, const TreeFloat& b) {
+    return TreeVec3{a.x / b, a.y / b, a.z / b};
+}
 Tree _union(Tree a, Tree b) {
     return min(a, b);
 }
@@ -60,15 +76,6 @@ Tree difference(Tree a, Tree b) {
     return intersection(a, inverse(b));
 }
 
-Tree smoothUnion(Tree fA, Tree fB) {
-  	return (1.0 / 1.5) * (fA + fB - sqrt(fA*fA + fB*fB - fA*fB));
-}
-Tree smoothIntersection(Tree fA, Tree fB) {
-    return (1.0 / 1.5) * (fA + fB + sqrt(fA*fA + fB*fB - fA*fB));
-}
-Tree smoothDifference(Tree a, Tree b) {
-    return smoothIntersection(a, inverse(b));
-}
 Tree offset(Tree a, float off) {
     return a - off;
 }
@@ -328,6 +335,107 @@ Tree cylinder_x(TreeFloat r, TreeFloat h, TreeVec3 base) {
     return rotate_y(extrude_z(circle(r, {-base.z, base.y}), base.x, base.x + h), -M_PI/2, {0,0,0});
 }
 
+
+Tree smoothUnion(Tree fA, Tree fB, TreeFloat s0) {
+  	return s0 * (fA + fB - sqrt(fA*fA + fB*fB - fA*fB));
+}
+Tree smoothIntersection(Tree a, Tree b, TreeFloat s0) {
+    auto h = clamp(0.5 - 0.5*(a-b)/s0,0,1);
+    auto interp = a * (1 - h) - b * h;
+    return interp + s0 * h * (1-h);
+    // return s0 * (fA + fB + sqrt(fA*fA + fB*fB - fA*fB));
+}
+Tree smoothDifference(Tree a, Tree b, TreeFloat s0) {
+    auto h = clamp(0.5 - 0.5*(a+b)/s0,0,1);
+    auto interp = a * (1 - h) - b * h;
+    return interp + s0 * h * (1-h);
+    // return smoothIntersection(a, inverse(b), s0);
+}
+
+#define AXIS_X 1
+#define AXIS_Y 2
+#define AXIS_Z 4
+Tree attract_repel_generic(Tree shape, TreeVec3 locus,
+                           TreeFloat radius, TreeFloat exaggerate, float sign,
+                           uint8_t axes)
+{
+    LIBFIVE_DEFINE_XYZ();
+    const auto norm = sqrt(
+        square((axes & AXIS_X) ? x : 0) +
+        square((axes & AXIS_Y) ? y : 0) +
+        square((axes & AXIS_Z) ? z : 0));
+    const auto fallout = 1 + sign * exaggerate * exp(-norm / radius);
+
+    return move(
+            move(shape, -locus).remap(
+                x * ((axes & AXIS_X) ? fallout : 1),
+                y * ((axes & AXIS_Y) ? fallout : 1),
+                z * ((axes & AXIS_Z) ? fallout : 1)),
+            locus);
+}
+
+Tree repel(Tree shape, TreeVec3 locus, TreeFloat radius, TreeFloat exaggerate) {
+    return attract_repel_generic(
+            shape, locus, radius, exaggerate, -1,
+            AXIS_X | AXIS_Y | AXIS_Z);
+}
+
+Tree repel_x(Tree shape, TreeVec3 locus, TreeFloat radius, TreeFloat exaggerate) {
+    return attract_repel_generic(shape, locus, radius, exaggerate, -1, AXIS_X);
+}
+
+Tree repel_y(Tree shape, TreeVec3 locus, TreeFloat radius, TreeFloat exaggerate) {
+    return attract_repel_generic(shape, locus, radius, exaggerate, -1, AXIS_Y);
+}
+
+Tree repel_z(Tree shape, TreeVec3 locus, TreeFloat radius, TreeFloat exaggerate) {
+    return attract_repel_generic(shape, locus, radius, exaggerate, -1, AXIS_Z);
+}
+
+Tree repel_xy(Tree shape, TreeVec3 locus, TreeFloat radius, TreeFloat exaggerate) {
+    return attract_repel_generic(shape, locus, radius, exaggerate, -1, AXIS_X | AXIS_Y);
+}
+
+Tree repel_yz(Tree shape, TreeVec3 locus, TreeFloat radius, TreeFloat exaggerate) {
+    return attract_repel_generic(shape, locus, radius, exaggerate, -1, AXIS_Y | AXIS_Z);
+}
+
+Tree repel_xz(Tree shape, TreeVec3 locus, TreeFloat radius, TreeFloat exaggerate) {
+    return attract_repel_generic(shape, locus, radius, exaggerate, -1, AXIS_X | AXIS_Z);
+}
+
+Tree attract(Tree shape, TreeVec3 locus, TreeFloat radius, TreeFloat exaggerate) {
+    return attract_repel_generic(
+            shape, locus, radius, exaggerate, 1,
+            AXIS_X | AXIS_Y | AXIS_Z);
+}
+
+Tree attract_x(Tree shape, TreeVec3 locus, TreeFloat radius, TreeFloat exaggerate) {
+    return attract_repel_generic(shape, locus, radius, exaggerate, 1, AXIS_X);
+}
+
+Tree attract_y(Tree shape, TreeVec3 locus, TreeFloat radius, TreeFloat exaggerate) {
+    return attract_repel_generic(shape, locus, radius, exaggerate, 1, AXIS_Y);
+}
+
+Tree attract_z(Tree shape, TreeVec3 locus, TreeFloat radius, TreeFloat exaggerate) {
+    return attract_repel_generic(shape, locus, radius, exaggerate, 1, AXIS_Z);
+}
+
+Tree attract_xy(Tree shape, TreeVec3 locus, TreeFloat radius, TreeFloat exaggerate) {
+    return attract_repel_generic(shape, locus, radius, exaggerate, 1, AXIS_X | AXIS_Y);
+}
+
+Tree attract_yz(Tree shape, TreeVec3 locus, TreeFloat radius, TreeFloat exaggerate) {
+    return attract_repel_generic(shape, locus, radius, exaggerate, 1, AXIS_Y | AXIS_Z);
+}
+
+Tree attract_xz(Tree shape, TreeVec3 locus, TreeFloat radius, TreeFloat exaggerate) {
+    return attract_repel_generic(shape, locus, radius, exaggerate, 1, AXIS_X | AXIS_Z);
+}
+
+
+
 vector<string> splitBySpaces(string s)
 {
   vector<string> result;
@@ -363,15 +471,15 @@ int parseNode(Node* parentNode, vector<string> words, int i){
     int nextPosition = i;
     Node node;
     string word = words[i];
-    if(word == "union" || word == "intersection" || word == "difference" || word == "blend" || word == "spheres" || word == "revolveCircles" || word  == "smoothunion" || word  == "smoothintersection" || word  == "smoothdifference"){
+    if(word == "union" || word == "intersection" || word == "difference" || word == "spheres" || word == "revolveCircles"){
         node.type = word;
         nextPosition = parseNode(&node, words, i+2);
         parentNode->children.push_back(node);
         if(nextPosition < words.size()-1){
             nextPosition = parseNode(parentNode, words, nextPosition);
         }
-    }else if(word == "offset" ){
-        node.type = "offset";
+    }else if(word == "offset" || word  == "smoothunion" || word  == "smoothintersection" || word  == "smoothdifference" || word == "blend"  || word == "blendrough" ){
+        node.type = word;
         node.data.push_back(stod(words[i+2]));
         nextPosition = parseNode(&node, words, i+3);
         parentNode->children.push_back(node);
@@ -394,7 +502,7 @@ int parseNode(Node* parentNode, vector<string> words, int i){
         if(nextPosition < words.size()-1){
             nextPosition = parseNode(parentNode, words, nextPosition);
         }
-      }else if(word == "rotate" || word == "scaleX" || word == "scaleY" || word == "scaleZ"){
+      }else if(word == "rotate" || word == "scaleX" || word == "scaleY" || word == "scaleZ"  || word == "reflectX" || word == "reflectY" || word == "reflectZ"){
         node.type = word;
         node.data.push_back(stod(words[i+2]));
         nextPosition = parseNode(&node, words, i+3);
@@ -745,14 +853,21 @@ Tree buildTree(Node& root) {
       Tree tr = buildTree(root.children[0]);
       for(size_t i = 1; i< root.children.size(); i++){
         auto child = root.children[i];
-        tr = smoothUnion(tr, buildTree(child));
+        tr = smoothUnion(tr, buildTree(child), root.data[0]);
       }
       return tr;
     } else if(root.type == "blend"){
       Tree tr = buildTree(root.children[0]);
       for(size_t i = 1; i< root.children.size(); i++){
         auto child = root.children[i];
-        tr = blend_expt(tr, buildTree(child), 0.75);
+        tr = blend_expt(tr, buildTree(child), root.data[0]);
+      }
+      return tr;
+    } else if(root.type == "blendrough"){
+      Tree tr = buildTree(root.children[0]);
+      for(size_t i = 1; i< root.children.size(); i++){
+        auto child = root.children[i];
+        tr = blend_rough(tr, buildTree(child), root.data[0]);
       }
       return tr;
     } else if(root.type == "difference"){
@@ -766,7 +881,7 @@ Tree buildTree(Node& root) {
       Tree tr = buildTree(root.children[0]);
       for(size_t i = 1; i< root.children.size(); i++){
         auto child = root.children[i];
-        tr = smoothDifference(tr, buildTree(child));
+        tr = smoothDifference(tr, buildTree(child), root.data[0]);
       }
       return tr;
     } else if(root.type == "intersection"){
@@ -780,7 +895,7 @@ Tree buildTree(Node& root) {
       Tree tr = buildTree(root.children[0]);
       for(size_t i = 1; i< root.children.size(); i++){
         auto child = root.children[i];
-        tr = smoothIntersection(tr, buildTree(child));
+        tr = smoothIntersection(tr, buildTree(child), root.data[0]);
       }
       return tr;
     } else if(root.type == "offset"){
@@ -843,6 +958,18 @@ Tree buildTree(Node& root) {
       } else if (view == 5) { // right
         tr = rotate_y(tr, M_PI/2, {0,0,0});
       }
+      return tr;
+    } else if(root.type == "reflectX"){
+      Tree tr = buildTree(root.children[0]);
+      tr = reflect_x(tr, root.data[0]);
+      return tr;
+    } else if(root.type == "reflectY"){
+      Tree tr = buildTree(root.children[0]);
+      tr = reflect_y(tr, root.data[0]);
+      return tr;
+    } else if(root.type == "reflectZ"){
+      Tree tr = buildTree(root.children[0]);
+      tr = reflect_z(tr, root.data[0]);
       return tr;
     } else if(root.type == "extend"){
       Tree tr = buildTree(root.children[0]);
