@@ -9,7 +9,7 @@
 
 (Tested on Mac OS X with dependencies installed via Homebrew.)
 
-Check add-web-assembly-support branch for my latest changes.
+Check testorcles and (add-web-assembly-support older) branch for my latest changes.
 
 ----
 
