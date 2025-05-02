@@ -15,6 +15,8 @@ Building:
 
  * Install & enable `emsdk` as per https://emscripten.org/docs/getting_started/downloads.html
 
+ * important step here: source ../../emsdk/emsdk_env.sh
+
  * Use version 2.0.23-lto of the emsdk (not the latest as in the instructions above)
 
  * Clone <https://github.com/Ammarkhat/libfiveAll/tree/add-web-assembly-support>.

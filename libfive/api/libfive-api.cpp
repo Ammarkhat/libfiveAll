@@ -156,6 +156,13 @@ Tree torus_z(TreeFloat ro, TreeFloat ri, TreeVec3 center) {
         center);
 }
 
+Tree torus_y(TreeFloat ro, TreeFloat ri, TreeVec3 center) {
+    return rotate_x(torus_z(ro, ri, center), -M_PI/2, {0,0,0});
+}
+Tree torus_x(TreeFloat ro, TreeFloat ri, TreeVec3 center) {
+    return rotate_y(torus_z(ro, ri, center), -M_PI/2, {0,0,0});
+}
+
 Tree torus(float r, float cx, float cy) {
     return move(rotate_x(torus_z(cx, r, {0,0,0}), M_PI/2, {0,0,0}), {0,cy,0});
 }
@@ -335,6 +342,62 @@ Tree cylinder_x(TreeFloat r, TreeFloat h, TreeVec3 base) {
     return rotate_y(extrude_z(circle(r, {-base.z, base.y}), base.x, base.x + h), -M_PI/2, {0,0,0});
 }
 
+Tree cone_ang_z(TreeFloat angle, TreeFloat height, TreeVec3 base) {
+    LIBFIVE_DEFINE_XYZ();
+    return move(max(-z, cos(angle) * sqrt(square(x) + square(y))
+                      + sin(angle) * (z - height)),
+                base);
+}
+Tree cone_z(TreeFloat radius, TreeFloat height, TreeVec3 base) {
+  // return taper_xy_z(cylinder_z(radius, height, base), base, height, TreeFloat(0), TreeFloat(1));
+  return cone_ang_z(atan2(radius, height), height, base);
+}
+Tree cone_ang_y(TreeFloat angle, TreeFloat height, TreeVec3 base) {
+    LIBFIVE_DEFINE_XYZ();
+    return move(max(-y, cos(angle) * sqrt(square(x) + square(z))
+                      + sin(angle) * (y - height)),
+                base);
+}
+Tree cone_y(TreeFloat radius, TreeFloat height, TreeVec3 base) {
+    return cone_ang_y(atan2(radius, height), height, base);
+}
+Tree cone_ang_x(TreeFloat angle, TreeFloat height, TreeVec3 base) {
+    LIBFIVE_DEFINE_XYZ();
+    return move(max(-x, cos(angle) * sqrt(square(z) + square(y))
+                      + sin(angle) * (x - height)),
+                base);
+}
+Tree cone_x(TreeFloat radius, TreeFloat height, TreeVec3 base) {
+    return cone_ang_x(atan2(radius, height), height, base);
+}
+
+
+Tree taper_x_y(Tree shape, TreeVec2 base, TreeFloat height,
+                TreeFloat scale, TreeFloat base_scale)
+{
+    LIBFIVE_DEFINE_XYZ();
+    const auto s = height / (scale * y + base_scale * (height - y));
+    return move(
+        move(shape, {-base.x, -base.y, 0}).remap(x * s, y, z),
+        {base.x, base.y, 0});
+}
+
+Tree taper_xy_z(Tree shape, TreeVec3 base, TreeFloat height,
+                TreeFloat scale, TreeFloat base_scale)
+{
+    LIBFIVE_DEFINE_XYZ();
+    const auto s = height / (scale * z + base_scale * (height - z));
+    return move(
+        move(shape, -base).remap(x * s, y * s, z),
+        base);
+}
+// Tree cone_z(TreeFloat radius1, TreeFloat radius2, TreeFloat height, TreeVec3 base) {
+//     auto angle = atan2(radius1 - radius2, height);
+//     TreeFloat H = radius1 / tan(angle);
+//     return intersection(cone_ang_z(angle, H, base), cylinder_z(radius1, height, base));
+// }
+
+
 
 Tree smoothUnion(Tree fA, Tree fB, TreeFloat s0) {
   	return s0 * (fA + fB - sqrt(fA*fA + fB*fB - fA*fB));
@@ -432,6 +495,28 @@ Tree attract_yz(Tree shape, TreeVec3 locus, TreeFloat radius, TreeFloat exaggera
 
 Tree attract_xz(Tree shape, TreeVec3 locus, TreeFloat radius, TreeFloat exaggerate) {
     return attract_repel_generic(shape, locus, radius, exaggerate, 1, AXIS_X | AXIS_Z);
+}
+
+Tree offset(Tree a, TreeFloat off) {
+    return a - off;
+}
+
+Tree clearance(Tree a, Tree b, TreeFloat o) {
+    return difference(a, offset(b, o));
+}
+
+Tree shell(Tree a, TreeFloat o) {
+    return clearance(a, a, -abs(o));
+}
+
+Tree gyroid(TreeVec3 period, TreeFloat thickness) {
+    LIBFIVE_DEFINE_XYZ();
+    const auto tau = 2 * M_PI;
+    return shell(
+        sin(x * period.x / tau) * cos(y * period.y / tau) +
+        sin(y * period.y / tau) * cos(z * period.z / tau) +
+        sin(z * period.z / tau) * cos(x * period.x / tau),
+        -thickness);
 }
 
 
@@ -553,6 +638,17 @@ int parseNode(Node* parentNode, vector<string> words, int i){
         if(nextPosition < words.size()-1){
             nextPosition = parseNode(parentNode, words, nextPosition);
         }
+    }else if(word == "gyroid"){
+        node.type = "gyroid";
+        node.data.push_back(stod(words[i+2]));
+        node.data.push_back(stod(words[i+3]));
+        node.data.push_back(stod(words[i+4]));
+        node.data.push_back(stod(words[i+5]));
+        nextPosition = parseNode(&node, words, i+6);
+        parentNode->children.push_back(node);
+        if(nextPosition < words.size()-1){
+            nextPosition = parseNode(parentNode, words, nextPosition);
+        }
     }else if(word == "s"){
         node.type = "sphere";
         node.data.push_back(stod(words[i+1]));
@@ -572,6 +668,17 @@ int parseNode(Node* parentNode, vector<string> words, int i){
         node.data.push_back(stod(words[i+7]));
         parentNode->children.push_back(node);
         nextPosition = parseNode(parentNode, words, i+8);
+     }else if(word == "cone"){
+        node.type = "cone";
+        node.data.push_back(stod(words[i+1]));
+        node.data.push_back(stod(words[i+2]));
+        node.data.push_back(stod(words[i+3]));
+        node.data.push_back(stod(words[i+4]));
+        node.data.push_back(stod(words[i+5]));
+        node.data.push_back(stod(words[i+6]));
+        node.data.push_back(stod(words[i+7]));
+        parentNode->children.push_back(node);
+        nextPosition = parseNode(parentNode, words, i+8);
     }else if(word == "sphere"){
         node.type = "sphere";
         node.data.push_back(stod(words[i+2]));
@@ -580,7 +687,7 @@ int parseNode(Node* parentNode, vector<string> words, int i){
         node.data.push_back(stod(words[i+5]));
         parentNode->children.push_back(node);
         nextPosition = parseNode(parentNode, words, i+6);
-    }else if(word == "c"){
+    }else if(word == "cs"){
         node.type = "capsule";
         node.data.push_back(stod(words[i+1]));
         node.data.push_back(stod(words[i+2]));
@@ -609,6 +716,15 @@ int parseNode(Node* parentNode, vector<string> words, int i){
         node.data.push_back(stod(words[i+3]));
         parentNode->children.push_back(node);
         nextPosition = parseNode(parentNode, words, i+4);
+     }else if(word == "torus_z" || word == "torus_y" || word == "torus_x"){
+        node.type = word;
+        node.data.push_back(stod(words[i+1]));
+        node.data.push_back(stod(words[i+2]));
+        node.data.push_back(stod(words[i+3]));
+        node.data.push_back(stod(words[i+4]));
+        node.data.push_back(stod(words[i+5]));
+        parentNode->children.push_back(node);
+        nextPosition = parseNode(parentNode, words, i+6);
     }else if(word == "cc"){
         node.type = "circle";
         node.data.push_back(stod(words[i+1]));
@@ -904,6 +1020,10 @@ Tree buildTree(Node& root) {
       // auto offs = root.data[0];
       // tr = elongate(tr, {offs, offs, offs});
       return tr;
+    } else if(root.type == "gyroid"){
+      Tree tr = buildTree(root.children[0]);
+      tr = intersection(gyroid({root.data[0],root.data[1],root.data[2]},root.data[3]), tr);
+      return tr;
     } else if(root.type == "limit"){
       Tree tr = buildTree(root.children[0]);
       auto view = root.data[0];
@@ -1020,10 +1140,43 @@ Tree buildTree(Node& root) {
       }else{
         return cylinder_x(radius, abs(p1x-p2x), {min(p1x, p2x), p1y, p1z});
       }
+    }else if(root.type == "cone"){
+      auto radius1 = root.data[0];
+      auto p1x = root.data[1];
+      auto p1y = root.data[2];
+      auto p1z = root.data[3];
+      auto p2x = root.data[4];
+      auto p2y = root.data[5];
+      auto p2z = root.data[6];
+      if(p1z != p2z){//along z
+        auto cn = cone_z(radius1, abs(p1z-p2z), {p1x, p1y, min(p1z, p2z)});
+        if(p1z > p2z){
+          cn = reflect_z(cn, (p1z+p2z)/2);
+        }
+        return cn;
+      }else if(p1y != p2y){
+        auto cn = cone_y(radius1, abs(p1y-p2y), {p1x, min(p1y, p2y), p1z});
+         if(p1y > p2y){
+          cn = reflect_y(cn, (p1y+p2y)/2);
+        }
+        return cn;
+      }else{
+        auto cn = cone_x(radius1, abs(p1x-p2x), {min(p1x, p2x), p1y, p1z});
+         if(p1x > p2x){
+          cn = reflect_x(cn, (p1x+p2x)/2);
+        }
+        return cn;
+      }
     } else if(root.type == "capsule"){
       return capsule(root.data[0], root.data[1], {root.data[2], root.data[3], root.data[4]}, {root.data[5], root.data[6], root.data[7]});
     } else if(root.type == "torus"){
       return torus(root.data[0], root.data[1], root.data[2]);
+    } else if(root.type == "torus_z"){
+      return torus_z(root.data[0], root.data[1], {root.data[2], root.data[3], root.data[4]});
+    } else if(root.type == "torus_y"){
+      return torus_y(root.data[0], root.data[1], {root.data[2], root.data[3], root.data[4]});
+    } else if(root.type == "torus_x"){
+      return torus_x(root.data[0], root.data[1], {root.data[2], root.data[3], root.data[4]});
     } else if(root.type == "circle"){
       return circle(root.data[0], {root.data[1], root.data[2]});
     } else if(root.type == "triangle"){
